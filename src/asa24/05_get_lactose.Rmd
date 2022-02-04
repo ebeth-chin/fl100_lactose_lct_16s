@@ -1,0 +1,296 @@
+---
+title: "05_get_lactose"
+output: 
+---
+
+1) remove SUBJECTS who report protein powder, meal replacement powders, or cocoa powder/hot cocoa in ANY recall because the amount of lactose can vary wildly depending on the specific entry 
+
+2) export D_TOTAL (raw ASA24 variable, incl calcium foritifed soy milk) with the lactose estimates 
+
+refer to excluded foodcode spreadsheets for details
+
+EC 02/04/2022 note that this is an updated version of /FL100_ASA24_lactose_estimation/06* and uses data downloaded from redcap 02/04/2022, and **starts** with all subjects who were enrolled (not only those who finished v2); results are the same though but this is 'more correct' for making a flow chart of subjects inclusion/exclusion
+
+
+```{r}
+library(dplyr)
+setwd("/Users/elizabeth.chin/Desktop/milk/FL100_ASA24_lactose_estimation/")
+#get the items
+items<- read.csv("data/raw_inputs/Items_JACorrections.csv", header=T) #22391
+inf<- read.csv("data/raw_inputs/INFMYPHEI_JA_Corrections.csv", header=T) #5387
+items$UserName<- gsub("[^0-9.-]", "", items$UserName)
+inf$UserName<- gsub("[^0-9.-]", "", inf$UserName)
+
+#import the lactose estimations
+lac16<- read.csv("data/outputs/final_matches/final_matches16.csv",header=T) #2282 
+lac14<- read.csv("data/outputs/final_matches/final_matches14.csv",header=T) #1167
+
+#bring in the recall totals (so we can kcal and qc filter)
+#these are for everyone who renrolled (n = 393)
+r2<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/raw_asa24/recall2_CTSC24532USDAWHNRCNu_DATA_2022-02-04_1347.csv", header=T)
+r3<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/raw_asa24/recall3_CTSC24532USDAWHNRCNu_DATA_2022-02-04_1349.csv", header=T)
+r4<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/raw_asa24/recall4_CTSC24532USDAWHNRCNu_DATA_2022-02-04_1350.csv", header=T)
+
+#these are for only those who completed v2
+#r1<- read.csv("data/raw_inputs/CTSC24532USDAWHNRCNu-ASA24T_DATA_2020-01-02_1127.csv", header=T)
+#r2<- read.csv("data/raw_inputs/CTSC24532USDAWHNRCNu-ASA241_DATA_2020-01-02_1128.csv", header=T)
+#r3<- read.csv("data/raw_inputs/CTSC24532USDAWHNRCNu-ASA242_DATA_2020-01-02_1128.csv", header=T)
+#r4<- read.csv("data/raw_inputs/CTSC24532USDAWHNRCNu-ASA243_DATA_2020-01-02_1129.csv", header=T)
+
+#LCT
+lct<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINAL_LCT_genotype_clean.csv", header=T)
+
+#metadata 
+eth<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINAL_ethnicities_clean.csv", header=T)
+bins<-read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_FINAL_Bins_agesexbmi_clean.csv", header=T)
+
+#IDs of subjects w/ sequencing data
+seqdata<- read.csv("/Users/elizabeth.chin/Desktop/milk/16S/SubjectIDs_2019-12-19.csv", header=T)
+
+#protein powder food codes to flag for exclusion
+ex14<- read.csv("data/raw_inputs/exclude_foodcode14.csv", header=T)
+ex16<- read.csv("data/raw_inputs/exclude_foodcode16.csv", header=T)
+```
+# Merge items with the lactose estimations
+
+2016:  
+```{r}
+items$code<- paste0(items$FoodCode, "_", items$Food_Description) %>% trimws()
+lac16$code<- paste0(lac16$FoodCode, "_", lac16$Food_Description) %>% trimws()
+items.lac<- merge(items, lac16, by = "code", all.x = T)
+sum(is.na(items.lac$Lactose))
+#View(items.lac %>% filter(is.na(Lactose) & FoodComp != 2))
+#View(items.lac %>% filter(is.na(Lactose)))
+
+#what doesn't have a food amount associated with it? 
+sum(is.na(items.lac$FoodAmt))
+noamt<- items.lac %>% filter(is.na(FoodAmt)) #221 foods but many are FoodCode == 9
+noamt<- items.lac %>% filter(is.na(FoodAmt) & FoodCode.x != 9)#only 16 foods- these are foods where subjects entered the item but no further details so nutrients could not be calculated
+#find out if any of these foods are high lactose containing? 
+df<- data.frame(items$FoodCode, items$Food_Description)
+#View(df %>% filter(items.FoodCode %in% noamt$FoodCode.x) %>% unique()) #only food with lactose is 92161005 	Cappuccino, sweetened Subj 8029 R2, but this recall is not contained in r2 (I suppose this subject didn't finish V2?)
+```
+
+2014
+```{r}
+inf$code<- paste0(inf$FoodCode, "_", inf$Food_Description) %>% trimws()
+lac14$code<- paste0(lac14$FoodCode, "_", lac14$Food_Description) %>% trimws()
+inf.lac<- merge(inf, lac14, by = "code", all.x=T)
+sum(is.na(inf.lac$Lactose)) #0 noice
+sum(is.na(inf.lac$FoodAmt)) #54
+noamt<- inf.lac %>% filter(is.na(FoodAmt))
+df<- data.frame(inf$FoodCode, inf$Food_Description) #the reason why there are some foods in lac14 without a food description (but not in lac16) is bceause when I was retrieving the ASA24 unique food list, I did na.omit for 2016 users but not 2014. 
+
+```
+
+make your life easier, rbind 2014 and 2016
+```{r}
+inf.lac2<- inf.lac %>% select(UserName, RecallNo, FoodCode.x, Food_Description.x, FoodAmt, Lactose, NCC.Food.Description, D_TOTAL)
+items.lac2<- items.lac %>% select(UserName, RecallNo, FoodCode.x, Food_Description.x, FoodAmt, Lactose, NCC.Food.Description, D_TOTAL)
+
+all.lac<- rbind(inf.lac2, items.lac2)
+colnames(all.lac)<-c("SubjectID", "RecallNo", "FoodCode", "Food_Description", "FoodAmt", "Lactose.p100g", "NCC.Food.Description", "D_TOTAL")
+
+#convert lactose to per-g basis
+all.lac$Lactose.p1g<- all.lac$Lactose.p100g/100
+```
+
+# Get lactose amounts
+```{r}
+all.lac$Lactose.consumed<- all.lac$Lactose.p1g * all.lac$FoodAmt
+```
+
+#who is reporting protein powders/drinks
+
+```{r}
+pro.codes<-rbind(ex14, ex16)
+pro<- all.lac %>% filter(FoodCode %in% pro.codes$FoodCode)
+
+dim(unique(pro[,1:2])) #116 unique subjects x recalls reporting protein powders/drinks (75 are from at-home recalls)
+length(unique(pro[,1])) #59 subjects
+```
+
+# Get only usable recalls
+
+```{r}
+'%nin%'<-Negate('%in%')
+#remove the training recall & subjects'recalls reporting protein
+all.nt<- all.lac %>% filter(RecallNo != 1) #20846 rows total, 1121 unique subjectxrecalls
+r2$sr.code<- paste0(r2$subject_id, "_", r2$recallno_tnf2)
+r3$sr.code<- paste0(r3$subject_id, "_", r3$recallno_tnf3)
+r4$sr.code<- paste0(r4$subject_id, "_", r4$recallno_tnf4)
+
+r2.ok<- r2 %>% filter(recallqc_passed_2 == 1) %>% 
+  select(subject_id, recallno_tnf2) #384
+r3.ok<- r3 %>% filter(recallqc_passed_3 == 1) %>% 
+  select(subject_id, recallno_tnf3) #378
+r4.ok<- r4 %>% filter(recallqc_passed_4 == 1) %>% 
+  select(subject_id, recallno_tnf4) #346
+colnames(r2.ok)<-c("SubjectID", "RecallNo")
+colnames(r3.ok)<-colnames(r2.ok)
+colnames(r4.ok)<-colnames(r2.ok)
+recalls<-rbind(r2.ok, r3.ok, r4.ok)
+
+who<- plyr::count(recalls, "SubjectID")
+keep<- who %>% filter(freq > 1) #these are the subjects with at least 2 at-home recalls passing ASA24 QC
+
+r2.keep<- r2.ok %>% filter(SubjectID %in% keep$SubjectID) #377
+r3.keep<- r3.ok %>% filter(SubjectID %in% keep$SubjectID) #378
+r4.keep<- r4.ok %>% filter(SubjectID %in% keep$SubjectID) #346
+
+check<- list(r2= r2.keep$SubjectID,
+             r3= r3.keep$SubjectID, 
+             r4= r4.keep$SubjectID)
+gplots::venn(check) 
+
+check2<- list(unique(pro$SubjectID), r2.ok$SubjectID, r3.ok$SubjectID, r4.ok$SubjectID)
+gplots::venn(check2)
+```
+# retain subjects items for only QC'd recalls  
+```{r}
+r2.lac<- all.nt %>% filter(RecallNo == 2) %>% filter(SubjectID %in% r2.keep$SubjectID)
+length(unique(r2.lac$SubjectID))#377
+r3.lac<- all.nt %>% filter(RecallNo == 3) %>% filter(SubjectID %in% r3.keep$SubjectID)
+length(unique(r3.lac$SubjectID)) #378
+r4.lac<- all.nt %>% filter(RecallNo == 4) %>% filter(SubjectID %in% r4.keep$SubjectID)
+length(unique(r4.lac$SubjectID)) #346
+
+qc.lac<- rbind(r2.lac, r3.lac, r4.lac)
+dim(qc.lac)
+length(unique(qc.lac$SubjectID)) #378 subjects
+colnames(qc.lac)
+```
+
+# Calculate the *total* Lactose and D_TOTAL *per recall per subject*
+
+```{r}
+per.recall<- aggregate(cbind(Lactose.consumed, D_TOTAL) ~ SubjectID + RecallNo, data=qc.lac, FUN="sum")
+dim(per.recall) #1101
+#check
+dim(per.recall %>% select(SubjectID, RecallNo) %>% unique())
+sum(keep$freq) #checks out 
+```
+
+# Calculate the *average* Lactose and D_TOTAL *per subject, averaged over n recalls*
+
+```{r}
+per.subject<- aggregate(cbind(Lactose.consumed,D_TOTAL) ~ SubjectID, data=per.recall, FUN="mean") #296 subjects
+write.csv(per.subject, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/01_asa24_lactose_dtotal.csv", row.names=F)
+write.csv(per.recall, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/01b_asa24_lactose_dtotal_per_recall.csv", row.names=F)
+
+```
+
+# Get rid of subjects reporting protein powders or cocoa powders
+
+how many subjects would there be if we removed those who report hot cocoa? 
+11830160
+11830165
+11830110
+
+
+```{r}
+'%nin%'<-Negate('%in%')
+noprotein<- per.subject %>% filter(SubjectID %nin% pro$SubjectID)
+dim(noprotein) #321
+```
+
+```{r}
+cocoa<- all.lac %>% filter(FoodCode == 11830165 | FoodCode == 11830160 | FoodCode == 11830110)
+nococoa<- noprotein %>% filter(SubjectID %nin% cocoa$SubjectID) #317 subjects 
+
+write.csv(nococoa, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/02_asa24_lactose_dtotal_no_powders.csv", row.names=F)
+
+#gplots::venn(list("cocoa" = unique(cocoa$SubjectID), "pro"= unique(pro$SubjectID), "nofilt" = unique(per.subject$SubjectID)))
+```
+
+
+
+# merge with sequencing, lct, ethnicity data
+```{r}
+master<- merge(merge(lct, eth, by = "SubjectID"), bins, by.x = "SubjectID", by.y="subject_id") #349 subjects
+
+#lactose with metadata, protein/breakfast/cocoa powder consumers removed
+master.lac<- merge(master, nococoa, by = "SubjectID") #286 subjects
+write.csv(master.lac, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/03_asa24_lactose_dtotal_no_powders_lct.csv", row.names=F)
+
+gplots::venn(list("meta" = unique(master$SubjectID), "lac" = unique(nococoa$SubjectID)))
+```
+
+
+```{r}
+summary(master.lac)
+for.plot<- master.lac
+library(plotly)
+shapes<- c("circle", "cross")
+for.plot$shapes<- shapes[for.plot$sex]
+for.plot$col<- rainbow(3)[for.plot$LCT]
+
+plot_ly(data=master.lac, x = ~Lactose.consumed, type="scatter",
+        text=~paste("Subject:",SubjectID,
+                    "<br>Ethnicity:", Ethnicity,
+                    "<br>Age:", age,
+                    "<br>BMI:", bmi_final),
+        color=~LCT, 
+        symbol= ~sex,
+        size=3)
+
+```
+```{r}
+hist(master.lac$Lactose.consumed)
+ggplot(data=master.lac, aes(x = LCT, y = Lactose.consumed)) + geom_boxplot(varwidth=T, notch=T, aes(fill=LCT)) + 
+  theme_classic() + ggtitle("Lactose (g, averaged over 2 or 3 recalls) for the LCT genotype")
+ggplot(data=master.lac, aes(x = as.factor(sex), y = Lactose.consumed)) + geom_boxplot(varwidth=T, notch=T, aes(fill=sex)) + 
+  theme_classic() + ggtitle("Lactose (g, averaged over 2 or 3 recalls) for\nmen and women")
+```
+
+```{r}
+## Summarizes data.
+## Gives count, mean, standard deviation, standard error of the mean, and confidence 
+## interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95) {
+    library(doBy)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # Collapse the data
+    formula <- as.formula(paste(measurevar, paste(groupvars, collapse=" + "), sep=" ~ "))
+    datac <- summaryBy(formula, data=data, FUN=c(length2,mean,sd), na.rm=na.rm)
+
+    # Rename columns
+    names(datac)[ names(datac) == paste(measurevar, ".mean",    sep="") ] <- measurevar
+    names(datac)[ names(datac) == paste(measurevar, ".sd",      sep="") ] <- "sd"
+    names(datac)[ names(datac) == paste(measurevar, ".length2", sep="") ] <- "N"
+    
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+    
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+    
+    return(datac)
+}
+```
+
+```{r}
+df<- summarySE(master.lac, measurevar="Lactose.consumed", 
+                  groupvars="LCT")
+
+ggplot(df, aes(x= LCT, y = Lactose.consumed)) + geom_bar(aes(fill=LCT), stat="identity") +
+  geom_errorbar(aes(ymin=Lactose.consumed-se, ymax=Lactose.consumed + se), width=0.2) +
+  theme_classic() + ggtitle("Lactose consumed (g, averaged over 2 or 3 recalls)\nby LCT Genotype, excluding protein powder consumers") +
+  xlab("LCT Genotype") + ylab("Lactose Consumed (g +/- SEM)")
+#ggsave("/Users/elizabeth.chin/Desktop/milk/FL100_ASA24_lactose_estimation/plots/lactose_by_LCT.png", width=6, height=5)
+```
+
+
