@@ -1,0 +1,66 @@
+---
+title: "FL100 FFQ Lactose and DTOTAL"
+---
+
+Author: E. Chin
+Date: 02/07/2022
+Purpose: Get Lactose and D_TOTAL from FFQ for use for 16S <> LCT <> Lactose paper 
+
+
+
+```{r}
+library(dplyr)
+setwd("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/")
+ffq<- read.csv("raw_ffq/CTSC24532USDAWHNRCNu_DATA_2022-02-07_1003.csv", header=T)
+lct<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINAL_LCT_genotype_clean.csv", header=T)
+eth<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINAL_ethnicities_clean.csv", header=T)
+bins<-read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/CTSC24532USDAWHNRCNu-BinAgeSexBMI_DATA_2022-02-09_1403.csv", header=T)
+
+```
+
+```{r}
+dim(ffq) #393 x 1081
+#find cols related to qc
+colnames(ffq)[1000:1081]
+```
+
+get just the dairy columns, QC columns   
+
+lacs is in grams   
+dtotal in cup eq. from FFQ data dict: Total milk, yogurt, cheese, and whey. For some foods, the total dairy values
+could be higher than the sum of D_MILK, D_YOGURT, and D_CHEESE
+because Miscellaneous dairy component composed of whey which is not
+included in FPED as a separate variable.   
+
+
+```{r}
+dairy<- ffq %>% select(subject_id, d_total, lacs, ffq_qaqc_kcalok:block_ffq_complete)
+```
+
+ffq_qc_passed is the variable created for whether a subject passed QC after Joanne Arsenault did QC (pass = 1, 0 = no); includes consideration for total intake and number of foods reported 
+```{r}
+sum(is.na(dairy)) #168
+plyr::count(dairy, "ffq_qc_passed")
+```
+
+```{r}
+passing <- dairy %>% filter(ffq_qc_passed == 1) %>% select(-c(ffq_qaqc_kcalok:block_ffq_complete)) #359 subjects, correct 
+```
+
+merge with the metadata
+```{r}
+master<- merge(merge(lct, eth, by = "SubjectID"), bins, by.x = "SubjectID", by.y="subject_id") #349 subjects
+
+```
+```{r}
+df<- merge(master, passing, by.x = "SubjectID", by.y= "subject_id") #346 subjects
+```
+
+```{r}
+setwd("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/")
+
+#save all dtotal and lacs for those passing ffq
+write.csv(passing, "out_ffq/01_ffq_lactose_dtotal.csv", row.names=F)
+write.csv(df, "out_ffq/02_ffq_lactose_dtotal_lct.csv", row.names=F)
+```
+

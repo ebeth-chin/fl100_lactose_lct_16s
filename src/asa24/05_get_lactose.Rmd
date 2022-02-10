@@ -42,10 +42,7 @@ lct<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINA
 
 #metadata 
 eth<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINAL_ethnicities_clean.csv", header=T)
-bins<-read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_FINAL_Bins_agesexbmi_clean.csv", header=T)
-
-#IDs of subjects w/ sequencing data
-seqdata<- read.csv("/Users/elizabeth.chin/Desktop/milk/16S/SubjectIDs_2019-12-19.csv", header=T)
+bins<-read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/CTSC24532USDAWHNRCNu-BinAgeSexBMIallSubje_DATA_2022-02-09_1449.csv", header=T)
 
 #protein powder food codes to flag for exclusion
 ex14<- read.csv("data/raw_inputs/exclude_foodcode14.csv", header=T)
@@ -76,9 +73,9 @@ df<- data.frame(items$FoodCode, items$Food_Description)
 inf$code<- paste0(inf$FoodCode, "_", inf$Food_Description) %>% trimws()
 lac14$code<- paste0(lac14$FoodCode, "_", lac14$Food_Description) %>% trimws()
 inf.lac<- merge(inf, lac14, by = "code", all.x=T)
-sum(is.na(inf.lac$Lactose)) #0 noice
+sum(is.na(inf.lac$Lactose)) #31
 sum(is.na(inf.lac$FoodAmt)) #54
-noamt<- inf.lac %>% filter(is.na(FoodAmt))
+noamt<- inf.lac %>% filter(is.na(FoodAmt)) %>% select(NCC.Food.Description, everything())
 df<- data.frame(inf$FoodCode, inf$Food_Description) #the reason why there are some foods in lac14 without a food description (but not in lac16) is bceause when I was retrieving the ASA24 unique food list, I did na.omit for 2016 users but not 2014. 
 
 ```
@@ -170,13 +167,18 @@ dim(per.recall) #1101
 dim(per.recall %>% select(SubjectID, RecallNo) %>% unique())
 sum(keep$freq) #checks out 
 ```
+```{r}
+old<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/01_asa24_lactose_dtotal.csv", header=T)
+ifelse(round(old$D_TOTAL,2) == round(per.subject$D_TOTAL,2), 1, 0)
+```
+
 
 # Calculate the *average* Lactose and D_TOTAL *per subject, averaged over n recalls*
 
 ```{r}
 per.subject<- aggregate(cbind(Lactose.consumed,D_TOTAL) ~ SubjectID, data=per.recall, FUN="mean") #296 subjects
-write.csv(per.subject, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/01_asa24_lactose_dtotal.csv", row.names=F)
-write.csv(per.recall, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/01b_asa24_lactose_dtotal_per_recall.csv", row.names=F)
+write.csv(per.subject, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/01_asa24_lactose_dtotal.csv", row.names=F)
+write.csv(per.recall, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/01b_asa24_lactose_dtotal_per_recall.csv", row.names=F)
 
 ```
 
@@ -198,16 +200,16 @@ dim(noprotein) #321
 cocoa<- all.lac %>% filter(FoodCode == 11830165 | FoodCode == 11830160 | FoodCode == 11830110)
 nococoa<- noprotein %>% filter(SubjectID %nin% cocoa$SubjectID) #317 subjects 
 
-write.csv(nococoa, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/02_asa24_lactose_dtotal_no_powders.csv", row.names=F)
+write.csv(nococoa, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/02_asa24_lactose_dtotal_no_powders.csv", row.names=F)
 
 #gplots::venn(list("cocoa" = unique(cocoa$SubjectID), "pro"= unique(pro$SubjectID), "nofilt" = unique(per.subject$SubjectID)))
 ```
 
 
-
 # merge with sequencing, lct, ethnicity data
 ```{r}
-master<- merge(merge(lct, eth, by = "SubjectID"), bins, by.x = "SubjectID", by.y="subject_id") #349 subjects
+master<- merge(merge(lct, eth, by = "SubjectID"), bins, by.x = "SubjectID", by.y="subject_id")%>% 
+  dplyr::select(-c(visit1_date:age_ffq))#349 subjects
 
 #lactose with metadata, protein/breakfast/cocoa powder consumers removed
 master.lac<- merge(master, nococoa, by = "SubjectID") #286 subjects
