@@ -14,7 +14,9 @@ setwd("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/")
 ffq<- read.csv("raw_ffq/CTSC24532USDAWHNRCNu_DATA_2022-02-07_1003.csv", header=T)
 lct<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINAL_LCT_genotype_clean.csv", header=T)
 eth<- read.csv("/Users/elizabeth.chin/Desktop/milk/genotype_ethnicity/FL100_FINAL_ethnicities_clean.csv", header=T)
-bins<-read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/CTSC24532USDAWHNRCNu-BinAgeSexBMI_DATA_2022-02-09_1403.csv", header=T)
+bins<-read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/CTSC24532USDAWHNRCNu-BinAgeSexBMIallSubje_DATA_2022-02-09_1449.csv", header=T)
+
+#bins file came from Ellen Bonnel emailed 02/09/2022; age is v1 (from physiology), sex from physiology, bmi_final is calculated using visit 1 height and visit 2 (fasting) weight
 
 ```
 
@@ -34,7 +36,7 @@ included in FPED as a separate variable.
 
 
 ```{r}
-dairy<- ffq %>% select(subject_id, d_total, lacs, ffq_qaqc_kcalok:block_ffq_complete)
+dairy<- ffq %>% select(subject_id, d_total, lacs, dt_kcal, ffq_qaqc_kcalok:block_ffq_complete)
 ```
 
 ffq_qc_passed is the variable created for whether a subject passed QC after Joanne Arsenault did QC (pass = 1, 0 = no); includes consideration for total intake and number of foods reported 
@@ -49,12 +51,16 @@ passing <- dairy %>% filter(ffq_qc_passed == 1) %>% select(-c(ffq_qaqc_kcalok:bl
 
 merge with the metadata
 ```{r}
-master<- merge(merge(lct, eth, by = "SubjectID"), bins, by.x = "SubjectID", by.y="subject_id") #349 subjects
+master<- merge(merge(lct, eth, by = "SubjectID"), bins, by.x = "SubjectID", by.y="subject_id") %>%
+  dplyr::select(-c(visit1_date:age_ffq)) #349 subjects
 
 ```
 ```{r}
 df<- merge(master, passing, by.x = "SubjectID", by.y= "subject_id") #346 subjects
 ```
+
+
+
 
 ```{r}
 setwd("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/")

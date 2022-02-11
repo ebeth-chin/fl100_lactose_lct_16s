@@ -82,11 +82,11 @@ df<- data.frame(inf$FoodCode, inf$Food_Description) #the reason why there are so
 
 make your life easier, rbind 2014 and 2016
 ```{r}
-inf.lac2<- inf.lac %>% select(UserName, RecallNo, FoodCode.x, Food_Description.x, FoodAmt, Lactose, NCC.Food.Description, D_TOTAL)
-items.lac2<- items.lac %>% select(UserName, RecallNo, FoodCode.x, Food_Description.x, FoodAmt, Lactose, NCC.Food.Description, D_TOTAL)
+inf.lac2<- inf.lac %>% select(UserName, RecallNo, FoodCode.x, Food_Description.x, FoodAmt, Lactose, NCC.Food.Description, D_TOTAL,KCAL)
+items.lac2<- items.lac %>% select(UserName, RecallNo, FoodCode.x, Food_Description.x, FoodAmt, Lactose, NCC.Food.Description, D_TOTAL, KCAL)
 
 all.lac<- rbind(inf.lac2, items.lac2)
-colnames(all.lac)<-c("SubjectID", "RecallNo", "FoodCode", "Food_Description", "FoodAmt", "Lactose.p100g", "NCC.Food.Description", "D_TOTAL")
+colnames(all.lac)<-c("SubjectID", "RecallNo", "FoodCode", "Food_Description", "FoodAmt", "Lactose.p100g", "NCC.Food.Description", "D_TOTAL", "KCAL")
 
 #convert lactose to per-g basis
 all.lac$Lactose.p1g<- all.lac$Lactose.p100g/100
@@ -161,15 +161,11 @@ colnames(qc.lac)
 # Calculate the *total* Lactose and D_TOTAL *per recall per subject*
 
 ```{r}
-per.recall<- aggregate(cbind(Lactose.consumed, D_TOTAL) ~ SubjectID + RecallNo, data=qc.lac, FUN="sum")
+per.recall<- aggregate(cbind(Lactose.consumed, D_TOTAL, KCAL) ~ SubjectID + RecallNo, data=qc.lac, FUN="sum")
 dim(per.recall) #1101
 #check
 dim(per.recall %>% select(SubjectID, RecallNo) %>% unique())
 sum(keep$freq) #checks out 
-```
-```{r}
-old<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/01_asa24_lactose_dtotal.csv", header=T)
-ifelse(round(old$D_TOTAL,2) == round(per.subject$D_TOTAL,2), 1, 0)
 ```
 
 
