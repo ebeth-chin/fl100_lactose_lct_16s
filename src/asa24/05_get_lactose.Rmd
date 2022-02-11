@@ -172,7 +172,7 @@ sum(keep$freq) #checks out
 # Calculate the *average* Lactose and D_TOTAL *per subject, averaged over n recalls*
 
 ```{r}
-per.subject<- aggregate(cbind(Lactose.consumed,D_TOTAL) ~ SubjectID, data=per.recall, FUN="mean") #296 subjects
+per.subject<- aggregate(cbind(Lactose.consumed,D_TOTAL, KCAL) ~ SubjectID, data=per.recall, FUN="mean") #296 subjects
 write.csv(per.subject, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/01_asa24_lactose_dtotal.csv", row.names=F)
 write.csv(per.recall, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/01b_asa24_lactose_dtotal_per_recall.csv", row.names=F)
 
@@ -209,7 +209,7 @@ master<- merge(merge(lct, eth, by = "SubjectID"), bins, by.x = "SubjectID", by.y
 
 #lactose with metadata, protein/breakfast/cocoa powder consumers removed
 master.lac<- merge(master, nococoa, by = "SubjectID") #286 subjects
-write.csv(master.lac, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/03_asa24_lactose_dtotal_no_powders_lct.csv", row.names=F)
+write.csv(master.lac, "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/03_asa24_lactose_dtotal_no_powders_lct.csv", row.names=F)
 
 gplots::venn(list("meta" = unique(master$SubjectID), "lac" = unique(nococoa$SubjectID)))
 ```
