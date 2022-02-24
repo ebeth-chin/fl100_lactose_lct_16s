@@ -1,0 +1,223 @@
+---
+title: "02_ASA24_LNP_analysis_caucasians_hispanics"
+---
+
+Author: E.Chin
+Purpose: ASA24 Lactose and D_TOTAL analysis w.r.t. LNP genotypes; for use with 16s analysis paper. This is for only the Caucasian and Hispanic subjects. 
+
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(car)
+library(doBy)
+library(GGally)
+library(corrplot)
+library(cowplot)
+library(emmeans)
+library(MASS)
+library(rcompanion)
+
+asa<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/03_asa24_lactose_dtotal_no_powders_lct.csv", header=T) #these are the subjects who have lactose (average over 2 or 3 recalls) estimates available from usable ASA24 recalls  
+
+#Only keep the Caucasian and Hispanic subjects
+asa<-asa %>% filter(Ethnicity == "Caucasian" | Ethnicity == "Hispanic")
+asa$Ethnicity<-as.factor(asa$Ethnicity)
+asa$LCT<-as.factor(asa$LCT)
+asa$LNP<-as.factor(asa$LNP)
+
+
+male<- asa %>% filter(sex == 1)
+female<- asa %>% filter(sex == 2)
+```
+
+```{r}
+summary(male)
+summary(female)
+```
+
+```{r}
+plyr::count(asa, c("sex", "LNP")) %>% htmlTable::htmlTable(rnames = F)
+plyr::count(asa, c("sex", "LCT")) %>% htmlTable::htmlTable(rnames=F)
+```
+
+```{r}
+makecorrs<- function(data, titlename){
+  asatmp<- data %>% dplyr::select(SubjectID, age, ht_cm:bmi_final, Lactose.consumed:KCAL)
+  asacorr<- cor(asatmp[,-1])
+  title = paste0("corrplot for ", titlename)
+  asap<- ggcorrplot::cor_pmat(asatmp[,-1])
+  cplot<- corrplot::corrplot(asacorr, is.corr=F, tl.srt=65, p.mat=asap, sig.level = 0.05, insig="pch",
+                   mar=c(0,0,3,0), title = title)
+  return(cplot)
+}
+```
+
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/corrplot_asa_men.pdf", width = 4, height =4)
+corr_men<- makecorrs(male, "men")
+dev.off()
+
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/corrplot_asa_women.pdf", width = 4, height =4)
+corr_women<- makecorrs(female, "women")
+dev.off()
+```
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/scatter_asa_lactose_dtotal_sex.pdf", width = 6, height =4)
+ggplot(data = asa, aes(x = D_TOTAL, y = Lactose.consumed, color = LNP)) + geom_point(aes(fill =LNP), size = 2) + 
+  geom_rug()+
+  facet_wrap(~factor(sex), scales = "free") + theme_bw()
+dev.off()
+```
+# Check out distributions
+
+```{r}
+hist(male$Lactose.consumed)
+hist(male$D_TOTAL)
+hist(female$Lactose.consumed)
+hist(female$D_TOTAL)
+```
+
+```{r}
+bc_transform<- function(data, var){
+  for_trans<- data[,var]
+  Box = boxcox(for_trans ~ 1,              # Transform Turbidity as a single vector
+             lambda = seq(-6,6,0.1))      # Try values -6 to 6 by 0.1
+  Cox = data.frame(Box$x, Box$y)            # Create a data frame with the results
+  Cox2 = Cox[with(Cox, order(-Cox$Box.y)),] # Order the new data frame by decreasing y
+  Cox2[1,]                                  # Display the lambda with the greatest
+                                          #    log likelihood
+  lambda = Cox2[1, "Box.x"]                 # Extract that lambda 0.3
+  print(lambda)
+  dat_box = (for_trans ^ lambda - 1)/lambda   # Transform the original data
+  hist(dat_box)
+  shapiro.test(dat_box) %>% print()
+  newname<- paste0(var,"_box")
+  data[,newname]<- dat_box
+  return(data)
+}
+```
+
+
+transform variables
+```{r transform-lactose}
+male<- bc_transform(data = male, var = "Lactose.consumed") #lambda = 0.3
+female<- bc_transform(data = female, var = "Lactose.consumed") #lambda = 0.4
+
+#in case we need to backtransform, let's use the same labmdas for kcal
+male$kcal_box<- (male$KCAL ^ 0.3 - 1) / 0.3
+female$kcal_box<- (female$KCAL ^ 0.4 - 1) / 0.3
+
+hist(male$kcal_box)
+hist(female$kcal_box)
+
+#there are 0s in female$D_TOTAL, so we'll transform tukey
+female$total_tukey<-transformTukey(female$D_TOTAL)
+male$total_tukey<-transformTukey(male$D_TOTAL)
+
+
+```
+
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/boxplot_asa_lactose_lct_sex.pdf", width = 6, height =4)
+ggplot(data = asa, aes(x= LCT, y = Lactose.consumed)) + geom_boxplot(aes(fill = LNP), varwidth = T, notch = T) + 
+  theme_bw() + facet_wrap(~sex)
+dev.off()
+```
+
+
+# Does Lactose consumption significantly differ between LP and LNP? 
+```{r}
+ix_plots<- function(data, varx, vary){
+  plot_x<- data[,varx]
+  plot_y <- data[,vary]
+  q<- ggplot(data = data, aes(x = plot_x, y = plot_y, color = LNP)) + geom_point(aes(fill = LNP)) + 
+    geom_smooth(method = "lm", se = F, aes(color = LNP)) + theme_bw() + xlab(varx) + ylab(vary)
+  print(q)
+}
+
+ix_plots(data = male, varx = "KCAL", vary="Lactose.consumed")
+ix_plots(data = male, varx = "KCAL", vary="D_TOTAL")
+ix_plots(data = female, varx = "KCAL", vary="Lactose.consumed")
+ix_plots(data = female, varx = "KCAL", vary="D_TOTAL")
+```
+
+Does D_TOTAL or Lactose consumption differ with LNP status in MEN?
+```{r}
+t.test(data = male, total_tukey ~ LNP, alternative = "two.sided") #0.4902
+t.test(data = male, Lactose.consumed_box ~ LNP, alternative = "two.sided") #0.09469
+```
+```{r}
+do_lm<- function(df, yvar, x_main, x_cov){
+  y = df[,yvar]
+  xvar = df[,x_main]
+  xcov= df[,x_cov]
+  fit_ix<- lm(y ~ xcov*xvar, data = df)
+  s<- (summary(fit_ix))
+  d<- s$coefficients %>% as.data.frame()
+  if(d$`Pr(>|t|)`[4] < 0.05){
+    plot(fit_ix)
+    hist(fit_ix$residuals)
+    print(s)
+  }else if(d$`Pr(>|t|)`[4] >= 0.05){
+    print("no significant interction")
+    fit<- lm(y ~ xcov + xvar, data = df)
+    plot(fit)
+    hist(fit$residuals)
+    car::Anova(fit) %>% print()
+  }
+
+}
+```
+
+```{r}
+do_lm(df = male, yvar = "Lactose.consumed_box", x_main = "LNP", x_cov = "kcal_box")
+```
+
+```{r}
+do_lm(df = male, yvar = "total_tukey", x_main = "LNP", x_cov = "kcal_box")
+```
+
+```{r}
+t.test(data = female, total_tukey ~ LNP, alternative = "two.sided") #0.1608
+t.test(data = female, Lactose.consumed_box ~ LNP, alternative = "two.sided") #0.1117
+```
+
+
+```{r}
+do_lm(df = female, yvar = "Lactose.consumed_box", x_main = "LNP", x_cov = "kcal_box") #residuals are a little weird 
+
+do_lm(df = female, yvar = "total_tukey", x_main = "LNP", x_cov = "kcal_box")
+```
+
+Does lactose or total dairy significantly differ among LCT genotypes in men and women?
+
+```{r}
+car::Anova(lm(total_tukey ~ LCT, data = male))
+car::Anova(lm(Lactose.consumed_box ~ LCT, data = male))
+
+do_lm(df = male, yvar = "total_tukey", x_main = "LCT", x_cov = "kcal_box")
+do_lm(df = male, yvar = "Lactose.consumed_box", x_main = "LCT", x_cov = "kcal_box")
+
+#residuals of lactose lm looks a little weird, let's do ordinal logistic rgression as a 'non parametric' way to check 
+MASS::polr(factor(rank(Lactose.consumed))~ LCT, data = male) %>% car::Anova()
+```
+get marginal means for LCT/lactose in men 
+```{r}
+bctran <- make.tran("boxcox", 0.3)
+lct_fit <- with(bctran, 
+                lm(linkfun(Lactose.consumed) ~ linkfun(KCAL)+LCT, data = male))
+car::Anova(lct_fit)
+emmeans(lct_fit, pairwise~LCT, type = "response")
+```
+
+
+```{r}
+car::Anova(lm(total_tukey ~ LCT, data = female))
+car::Anova(lm(Lactose.consumed_box ~ LCT, data = female))
+
+do_lm(df = female, yvar = "total_tukey", x_main = "LCT", x_cov = "kcal_box")
+do_lm(df = female, yvar = "Lactose.consumed_box", x_main = "LCT", x_cov = "kcal_box")
+
+```
+

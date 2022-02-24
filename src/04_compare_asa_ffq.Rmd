@@ -1,0 +1,107 @@
+---
+title: "04_compare_ffq_asa.Rmd"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+Author: E.Chin
+Purpose: Compare ASA and FFQ lactose. Will help guide how much FFQ analysis to do. 
+
+```{r message=F, echo = F}
+library(dplyr)
+library(ggplot2)
+library(plotly)
+```
+
+```{r, echo = F}
+setwd("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/")
+ffq<- read.csv("out_ffq/02_ffq_lactose_dtotal_lct.csv", header=T)
+asa<-read.csv("out_asa24/03_asa24_lactose_dtotal_no_powders_lct.csv", header=T)
+```
+
+```{r, echo = F}
+dim(ffq) #346 x 15
+dim(asa) #286 x 15
+colnames(ffq)
+colnames(asa)
+```
+# Comparing ASA24 and FFQ data
+
+283 subjects have both FFQ and ASA24 data 
+```{r}
+#who overlaps
+gplots::venn(list("n FFQ subjects" = ffq$SubjectID, "n ASA subjects" = asa$SubjectID))
+```
+
+
+```{r echo = F}
+#merge
+df<- merge(ffq, asa, by = c("SubjectID", "LCT", "LNP", "Ethnicity", "age", "sex", "ht_cm", "weightv2", "bmi_final", "bin_number", "age_cat", "bmi_cat"), all =T)
+colnames(df)
+```
+# Comparing Lactose
+
+Plot of FFQ lactose (lacs) and ASA24 lactose (Lactose.consumed).     
+Color corresponds to LP status, size with bmi_final, and shape corresponds to sex (1 = Male, 2 = Female). Hover over the dots for more metadata info.  
+```{r warning=FALSE, message=FALSE}
+plot_ly(df, x = ~lacs, y = ~Lactose.consumed, 
+        color = ~LNP, symbol = ~factor(sex), size = ~bmi_final,
+        text = ~paste("SubjectID: ", SubjectID,
+                      "<br>Ethnicity: ", Ethnicity,
+                      "<br>LCT: ", LCT))
+```
+
+```{r}
+cor.test(df$lacs, df$Lactose.consumed, method = "pearson", alternative = "two.sided")
+```
+
+# Comparing total dairy
+
+Plot of FFQ total dairy (d_total, x axis) and ASA24 total dairy (D_TOTAL, y axis).    
+Color corresponds to LP status, size with bmi_final, and shape corresponds to sex (1 = Male, 2 = Female). Hover over the dots for more metadata info.  
+```{r warning=FALSE, message=FALSE}
+plot_ly(df, x = ~d_total, y = ~D_TOTAL, 
+        color = ~LNP, symbol = ~factor(sex), size = ~bmi_final,
+        text = ~paste("SubjectID: ", SubjectID,
+                      "<br>Ethnicity: ", Ethnicity,
+                      "<br>LCT: ", LCT))
+```
+
+```{r}
+cor.test(df$d_total, df$D_TOTAL, method = "pearson", alternative = "two.sided")
+```
+
+
+# Compare total caloric intake
+
+Plot of FFQ total intake (dt_kcal, x axis) and ASA24 total intake (KCAL, y axis).    
+Color corresponds to LP status, size with bmi_final, and shape corresponds to sex (1 = Male, 2 = Female). Hover over the dots for more metadata info.  
+```{r warning=FALSE, message=FALSE}
+plot_ly(df, x = ~dt_kcal, y = ~KCAL, 
+        color = ~LNP, symbol = ~factor(sex), size = ~bmi_final,
+        text = ~paste("SubjectID: ", SubjectID,
+                      "<br>Ethnicity: ", Ethnicity,
+                      "<br>LCT: ", LCT))
+```
+
+```{r}
+cor.test(df$dt_kcal, df$KCAL, method = "pearson", alternative = "two.sided")
+```
+
+# Compare FFQ total dairy to FFQ lactose
+
+Plot of FFQ total dairy (d_total, x axis) and FFQ lactose (lacs, y axis).    
+Color corresponds to LP status, size with bmi_final, and shape corresponds to sex (1 = Male, 2 = Female). Hover over the dots for more metadata info.  
+
+```{r warning=FALSE, message=FALSE}
+plot_ly(df, x = ~d_total, y = ~lacs, 
+        color = ~LNP, symbol = ~factor(sex), size = ~bmi_final,
+        text = ~paste("SubjectID: ", SubjectID,
+                      "<br>Ethnicity: ", Ethnicity,
+                      "<br>LCT: ", LCT))
+
+cor.test(df$d_total, df$lacs, method = "pearson", alternative = "two.sided")
+```
+

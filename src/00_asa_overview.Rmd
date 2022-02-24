@@ -1,0 +1,85 @@
+---
+title: "00_asa_overview"
+---
+
+Author: E.Chin
+Purpose: get summary of ASA24 data for manuscript 
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(car)
+library(doBy)
+library(GGally)
+library(corrplot)
+library(cowplot)
+library(emmeans)
+
+asa<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/03_asa24_lactose_dtotal_no_powders_lct.csv", header=T) #these are the subjects who have lactose (average over 2 or 3 recalls) estimates available from usable ASA24 recalls  
+
+#remove African American subjects who are GG
+af_gg<- asa %>% filter(Ethnicity == "African.American" & LCT == "GG")
+'%nin%'<-Negate('%in%')
+asa_filt<- asa %>% filter(SubjectID %nin% af_gg$SubjectID) %>% filter(SubjectID != 6083 & SubjectID != 8015)
+plyr::count(asa_filt, c("Ethnicity", "LCT"))
+asa <- asa_filt
+```
+
+
+```{r}
+## Summarizes data.
+## Gives count, mean, standard deviation, standard error of the mean, and confidence 
+## interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95) {
+    library(doBy)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # Collapse the data
+    formula <- as.formula(paste(measurevar, paste(groupvars, collapse=" + "), sep=" ~ "))
+    datac <- summaryBy(formula, data=data, FUN=c(length2,mean,sd), na.rm=na.rm)
+
+    # Rename columns
+    names(datac)[ names(datac) == paste(measurevar, ".mean",    sep="") ] <- measurevar
+    names(datac)[ names(datac) == paste(measurevar, ".sd",      sep="") ] <- "sd"
+    names(datac)[ names(datac) == paste(measurevar, ".length2", sep="") ] <- "N"
+    
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+    
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+    
+    return(datac)
+}
+```
+summarise by LP status
+```{r}
+asa %>% group_by(LNP) %>% 
+  summarize(mean_lactose = round(mean(Lactose.consumed),2),
+            sd_lactose = round(sd(Lactose.consumed),2),
+            mean_dairy = round(mean(D_TOTAL),2),
+            sd_dairy = round(sd(D_TOTAL),2)) %>% htmlTable::htmlTable(rnames=F)
+```
+
+summarise by Ethnicity 
+```{r}
+asa %>% group_by(Ethnicity) %>% 
+  summarize(mean_lactose = round(mean(Lactose.consumed),2),
+            sd_lactose = round(sd(Lactose.consumed),2),
+            mean_dairy = round(mean(D_TOTAL),2),
+            sd_dairy = round(sd(D_TOTAL),2)) %>% htmlTable::htmlTable(rnames = F)
+```
+

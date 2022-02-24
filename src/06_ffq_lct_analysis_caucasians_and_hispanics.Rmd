@@ -1,0 +1,186 @@
+---
+title: "06_ffq_lct_analysis_caucasians_hispanics"
+---
+
+Author: E.Chin
+Purpose: FFQ Lactose and d_total analysis w.r.t. LNP genotypes; for use with 16s analysis paper. This is only for the Caucasian and Hispanic participants. 
+
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(car)
+library(doBy)
+library(GGally)
+library(corrplot)
+library(cowplot)
+library(emmeans)
+
+ffq<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_ffq/02_ffq_lactose_dtotal_lct.csv", header=T) #these are the subjects who have lactose (average over 2 or 3 recalls) estimates available from usable ffq24 recalls  
+
+#include only cacuasian and hispanic subjets
+ffq <- ffq %>% filter(Ethnicity == "Caucasian" | Ethnicity == "Hispanic") #nrow = 260
+```
+
+```{r}
+summary(ffq)
+```
+
+```{r}
+ffq$sex<- as.factor(ffq$sex)
+ffq$Ethnicity<-as.factor(ffq$Ethnicity)
+ffq$LCT<-as.factor(ffq$LCT)
+ffq$LNP<-as.factor(ffq$LNP)
+```
+
+Does the frequency of LP vs LNP significantly differ among ethnicities? 
+
+```{r}
+plyr::count(ffq, c("Ethnicity", "LNP")) %>% tidyr::spread(., LNP, freq) %>% htmlTable::htmlTable(rnames = F)
+```
+
+correlation matrix
+```{r}
+ffqtmp<- ffq %>% dplyr::select(SubjectID, age, ht_cm:bmi_final, d_total:dt_kcal)
+ffqcorr<- cor(ffqtmp[,-1])
+ffqp<- ggcorrplot::cor_pmat(ffqtmp[,-1])
+#pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/corrplot_ffq.pdf", height = 5, width = 6)
+corrplot::corrplot(ffqcorr, is.corr=F, tl.srt=65, p.mat=ffqp, sig.level = 0.05, insig="pch",
+                   mar=c(0,0,1,0))
+dev.off()
+```
+```{r}
+ffqcorr
+ffqp
+```
+
+
+plots
+```{r, eval =F}
+
+ggduo(ffq, 
+      mapping=aes(color=LNP),
+      columnsX = c("lacs","d_total", "dt_kcal"),
+      columnsY=c("LNP", "Ethnicity", "age", "sex"),
+      types = list(continuous= "points", comboHorizontal="box"))
+
+ggduo(ffq, 
+      mapping=aes(color=LNP),
+      columnsX = c("lacs","d_total", "dt_kcal"),
+      columnsY=c("ht_cm", "weightv2", "bmi_final"),
+      types = list(continuous= "points", comboHorizontal="box")) +
+  theme_bw()
+
+```
+
+
+```{r plot-lactosevdtotal}
+p<-ggplot(data=ffq, aes(x= d_total, y = lacs)) + geom_point(aes(shape=sex, color = LNP), size = 2) + theme_bw() + 
+  ggtitle("Average Lactose Consumption vs Dairy Intake ") + ylab("Estimated Lactose Consumption (g)") +
+  xlab("Total Dairy Consumption (servings)") + geom_smooth(method="lm", se=F, col= "darkgray", linetype="dashed") + 
+  theme(legend.position = "bottom", 
+        plot.title = element_text(hjust=0.5),
+        legend.title = element_blank())
+p
+#ggsave(p,file = "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/scatter_ffq_lactose_dtotal.pdf", height=5, width=6, units="in", dpi=300)
+```
+
+```{r}
+a<- ggplot(data = ffq, aes(x = dt_kcal, y = lacs, color = LNP)) + geom_point(aes(shape = sex), size = 2) + 
+  geom_rug() + theme_bw() + theme(legend.position = "bottom") + ggtitle("Latose (g) vs dt_kcal")
+b<- ggplot(data = ffq, aes(x = dt_kcal, y = d_total, color = LNP)) + geom_point(aes(shape = sex), size = 2) + geom_rug() +theme_bw() + theme(legend.position = "bottom") + ggtitle("Total Dairy (cup eq.) vs dt_kcal")
+#pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/rugplot_ffq.pdf", width = 7, height = 5)
+plot_grid(a, b)
+dev.off()
+```
+# Check out distributions
+
+if we need to transform any variables to make model fit better, then we can just use log in the model (so we can back transform easier)
+```{r}
+hist(log(ffq$lacs))
+hist(log(ffq$d_total))
+hist(log(ffq$dt_kcal))
+```
+
+# Are there differences among sex and ethnicity? 
+
+```{r}
+make_boxplots<- function(x, y, dat){
+  varx = dat[,x]
+  vary = dat[,y]
+  y_trans = log(dat[,y])
+  p<- ggplot(data = dat, aes(x = varx, y = vary)) + geom_boxplot(aes(fill = varx), varwidth = T, notch = T) + theme_bw() +
+    xlab(x) + ylab(y)
+  print(p)
+  fit<-lm(y_trans~varx, data = dat)
+  plot(fit)
+  #summary(fit) %>% print()
+  car::Anova(fit) %>% print()
+}
+```
+
+```{r}
+##total intake does not significantly differ by ethnicities
+make_boxplots(dat = ffq, y = "dt_kcal", x = "Ethnicity")#0.9258
+make_boxplots(dat = ffq, y = "d_total", x = "Ethnicity") #0.8807
+make_boxplots(dat = ffq, y = "lacs", x = "Ethnicity")#0.5214
+
+
+make_boxplots(dat = ffq, y = "dt_kcal", x = "sex") 
+#men consumed significantly more kcal than women; p-value: 2.073e-09 *
+make_boxplots(dat = ffq, y = "d_total", x = "sex") 
+#men consumed significantly more total dairy than women; p-value = 0.000334
+make_boxplots(dat = ffq, y = "lacs", x = "sex")
+#difference in consumption approached significance; p-value 2.094e-05
+```
+
+```{r}
+a<- ggplot(data = ffq, aes(x = Ethnicity, y = lacs)) + geom_boxplot(aes(fill=Ethnicity)) + theme_bw() + theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=1, hjust = 1))
+b<- ggplot(data = ffq, aes(x = Ethnicity, y = d_total)) + geom_boxplot(aes(fill=Ethnicity)) + theme_bw() + theme(legend.position  = "none", axis.text.x = element_text(angle = 45, vjust=1, hjust = 1))
+#pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/boxplot_ffq_lactose_dtotal_eth.pdf", width = 7, height = 5)
+plot_grid(a,b)
+#dev.off()
+```
+
+# Does Lactose consumption significantly differ between LP and LNP (Caucasian and Hispanic subjects)? 
+```{r}
+t.test(log(lacs) ~ LNP, data = ffq)# not significantly different p = 0.06597
+
+a<- ggplot(data = ffq, aes(x = LNP, y = lacs)) + geom_boxplot(aes(fill = LNP), varwidth = T, notch= T) + theme_bw() +
+  ggtitle("FFQ Lactose and LP Status\n in Cacuasians and Hispanics") + theme(legend.position = "none")
+b<- ggplot(data = ffq, aes(x = LCT, y = lacs)) + geom_boxplot(aes(fill = LNP), varwidth = T, notch= T) + theme_bw() +
+  ggtitle("FFQ Lactose and LCT genotype in Caucasians and Hispanics") + theme(legend.position = "none")
+pdf("../plots/boxplot_ffq_lactose_lnp_lct_caucasian_hispanic.pdf", width = 4, height = 4)
+plot_grid(a, b)
+dev.off()
+
+ggsave(a, file = "../plots/boxplot_ffq_lactose_lnp_caucasian_hispanic.pdf", width = 4, height = 4)
+#ggplot(data = ffq, aes(x = LCT, y = lacs)) + geom_boxplot(aes(fill = LNP), varwidth = T, notch= T) + theme_bw()
+```
+```{r}
+ggplot(data = ffq, aes(x = dt_kcal, y = lacs)) + geom_point(aes(color = LNP)) + geom_smooth(method = "lm", se = F, aes(color = LNP)) + theme_bw()
+```
+
+
+is there an association when controling for kcal?
+```{r}
+lac_fit<- lm(log(lacs) ~ log(dt_kcal)+LNP, data = ffq)#no significant interaction, so we will keep it simple 
+plot(lac_fit) #looks good
+hist(lac_fit$residuals) #looks good
+summary(lac_fit) #0.049 LPLNP
+Anova(lac_fit)
+```
+```{r}
+emmeans(lac_fit, pairwise ~ LNP, type= "response")
+```
+
+```{r}
+t.test(log(d_total) ~ LNP, data = ffq) #p = 0.1661
+dairy_fit<- lm(log(d_total) ~ log(dt_kcal)+LNP, data = ffq)#no significant interaction, so we will keep it simple 
+plot(dairy_fit) #looks good
+hist(dairy_fit$residuals) #looks good
+summary(dairy_fit) #0.0938 LPLNP
+#Anova(dairy_fit)
+```
+
+

@@ -1,0 +1,188 @@
+---
+title: "06_ffq_lct_analysis_caucasians_hispanics"
+---
+
+Author: E.Chin
+Purpose: FFQ Lactose and d_total analysis w.r.t. LNP genotypes; for use with 16s analysis paper. This is only for the Caucasian and Hispanic participants. 
+
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(car)
+library(doBy)
+library(GGally)
+library(corrplot)
+library(cowplot)
+library(emmeans)
+
+ffq<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_ffq/02_ffq_lactose_dtotal_lct.csv", header=T) #these are the subjects who have lactose (average over 2 or 3 recalls) estimates available from usable ffq24 recalls  
+
+#include only cacuasian and hispanic subjets
+ffq <- ffq %>% filter(Ethnicity == "Caucasian" | Ethnicity == "Hispanic") #nrow = 260
+```
+
+```{r}
+summary(ffq)
+```
+
+```{r}
+ffq$sex<- as.factor(ffq$sex)
+ffq$Ethnicity<-as.factor(ffq$Ethnicity)
+ffq$LCT<-as.factor(ffq$LCT)
+ffq$LNP<-as.factor(ffq$LNP)
+```
+
+```{r}
+male<- ffq %>% filter(sex == 1)
+female<- ffq %>% filter(sex == 2)
+```
+
+```{r}
+summary(male)
+summary(female)
+```
+
+
+```{r}
+plyr::count(ffq, c("sex", "LNP")) %>% htmlTable::htmlTable(rnames = F)
+plyr::count(ffq, c("sex", "LCT")) %>% htmlTable::htmlTable(rnames=F)
+```
+
+
+
+correlation matrix
+
+```{r}
+makecorrs<- function(data, titlename){
+  asatmp<- data %>% dplyr::select(SubjectID, age, ht_cm:bmi_final, d_total:dt_kcal)
+  asacorr<- cor(asatmp[,-1])
+  title = paste0("corrplot for ", titlename)
+  asap<- ggcorrplot::cor_pmat(asatmp[,-1])
+  cplot<- corrplot::corrplot(asacorr, is.corr=F, tl.srt=65, p.mat=asap, sig.level = 0.05, insig="pch",
+                   mar=c(0,0,3,0), title = title)
+  return(cplot)
+}
+```
+
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/corrplot_ffq_men.pdf", width = 4, height =4)
+corr_men<- makecorrs(male, "men")
+dev.off()
+
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/corrplot_ffq_women.pdf", width = 4, height =4)
+corr_women<- makecorrs(female, "women")
+dev.off()
+```
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/scatter_ffq_lactose_dtotal_sex.pdf", width = 6, height =4)
+ggplot(data = ffq, aes(x = d_total, y = lacs, color = LNP)) + geom_point(aes(fill =LNP), size = 2) + 
+  geom_rug()+ geom_smooth(method = "lm", se = F) + 
+  facet_wrap(~factor(sex), scales = "free") + theme_bw()
+dev.off()
+```
+
+# Check out distributions
+
+```{r}
+hist(male$lacs %>% log())
+hist(male$d_total %>% log())
+hist(female$lacs %>% log()) #still a little skewed but we can see how model residuals look 
+hist(female$d_total %>% log())#still a little skewed but we can see how model residuals look 
+```
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/boxplot_ffq_lactose_lct_sex.pdf", width = 6, height =4)
+ggplot(data = ffq, aes(x= LCT, y = lacs)) + geom_boxplot(aes(fill = LNP), varwidth = T, notch = T) + ggtitle("Lactose")+
+  theme_bw() + facet_wrap(~sex)
+dev.off()
+```
+
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/boxplot_ffq_dairy_lct_sex.pdf", width = 6, height =4)
+ggplot(data = ffq, aes(x= LCT, y = d_total)) + geom_boxplot(aes(fill = LNP), varwidth = T, notch = T) + 
+  theme_bw() + facet_wrap(~sex) + ggtitle("Total Dairy")
+dev.off()
+```
+
+
+
+# Does Lactose consumption significantly differ between LP and LNP? 
+```{r message= F}
+ix_plots<- function(data, varx, vary){
+  plot_x<- data[,varx]
+  plot_y <- data[,vary]
+  q<- ggplot(data = data, aes(x = plot_x, y = plot_y, color = LNP)) + geom_point(aes(fill = LNP)) + 
+    geom_smooth(method = "lm", se = F, aes(color = LNP)) + theme_bw() + xlab(varx) + ylab(vary)
+  print(q)
+}
+
+ix_plots(data = male, varx = "dt_kcal", vary="lacs")
+ix_plots(data = male, varx = "dt_kcal", vary="d_total")
+ix_plots(data = female, varx = "dt_kcal", vary="lacs")
+ix_plots(data = female, varx = "dt_kcal", vary="d_total")
+```
+
+Does D_TOTAL or Lactose consumption differ with LNP status in MEN?
+```{r}
+t.test(data = male, log(d_total) ~ LNP, alternative = "two.sided") #0.5463
+t.test(data = male, log(lacs) ~ LNP, alternative = "two.sided") #0.2176
+```
+
+```{r}
+do_lm<- function(df, yvar, x_main, x_cov){
+  y = df[,yvar] %>% log()
+  xvar = df[,x_main]
+  xcov= df[,x_cov] %>% log()
+  fit_ix<- lm(y ~ xcov*xvar, data = df)
+  s<- (summary(fit_ix))
+  d<- s$coefficients %>% as.data.frame()
+  if(d$`Pr(>|t|)`[4] < 0.05){
+    plot(fit_ix)
+    hist(fit_ix$residuals)
+    print(s)
+  }else if(d$`Pr(>|t|)`[4] >= 0.05){
+    print("no significant interction")
+    fit<- lm(y ~ xcov + xvar, data = df)
+    plot(fit)
+    hist(fit$residuals)
+    car::Anova(fit) %>% print()
+  }
+
+}
+```
+
+```{r}
+do_lm(df = male, yvar = "lacs", x_main = "LNP", x_cov = "dt_kcal") #0.1695
+```
+```{r}
+do_lm(df = male, yvar = "d_total", x_main = "LNP", x_cov = "dt_kcal") #0.4373
+
+```
+
+```{r}
+do_lm(df = female, yvar = "lacs", x_main = "LNP", x_cov = "dt_kcal") #0.2233
+
+```
+
+```{r}
+do_lm(df = female, yvar = "d_total", x_main = "LNP", x_cov = "dt_kcal")#0.1495
+```
+Are there any differences w.r.t. LCT genoytpe? 
+
+```{r}
+car::Anova(lm(log(d_total) ~ LCT, data = male))#0.6871
+car::Anova(lm(log(lacs) ~ LCT, data = male))#0.229
+
+do_lm(df = male, yvar = "d_total", x_main = "LCT", x_cov = "dt_kcal") #0.7298
+do_lm(df = male, yvar = "lacs", x_main = "LCT", x_cov = "dt_kcal") #0.2337
+```
+
+```{r}
+car::Anova(lm(log(d_total) ~ LCT, data = female))#0.2652
+car::Anova(lm(log(lacs) ~ LCT, data = female))#0.2174
+
+do_lm(df = female, yvar = "d_total", x_main = "LCT", x_cov = "dt_kcal") #0.123
+do_lm(df = female, yvar = "lacs", x_main = "LCT", x_cov = "dt_kcal") #0.131s
+```
+
+

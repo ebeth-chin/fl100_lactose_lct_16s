@@ -1,0 +1,1108 @@
+---
+title: "02_ASA24_LNP_analysis_caucasians_hispanics"
+---
+
+Author: E.Chin
+Purpose: ASA24 Lactose and D_TOTAL analysis w.r.t. LNP genotypes; for use with 16s analysis paper. This is for only the Caucasian and Hispanic subjects. 
+
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(car)
+library(doBy)
+library(GGally)
+library(corrplot)
+library(cowplot)
+library(emmeans)
+
+asa<- read.csv("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/data/out_asa24/03_asa24_lactose_dtotal_no_powders_lct.csv", header=T) #these are the subjects who have lactose (average over 2 or 3 recalls) estimates available from usable ASA24 recalls  
+
+#Only keep the Caucasian and Hispanic subjects
+asa<-asa %>% filter(Ethnicity == "Caucasian" | Ethnicity == "Hispanic")
+```
+
+```{r}
+summary(asa)
+dim(asa)
+```
+
+```{r}
+asa$sex<- as.factor(asa$sex)
+asa$Ethnicity<-as.factor(asa$Ethnicity)
+asa$LCT<-as.factor(asa$LCT)
+asa$LNP<-as.factor(asa$LNP)
+```
+
+correlation matrix
+```{r}
+asatmp<- asa %>% dplyr::select(SubjectID, age, ht_cm:bmi_final, Lactose.consumed:KCAL)
+asacorr<- cor(asatmp[,-1])
+asap<- ggcorrplot::cor_pmat(asatmp[,-1])
+#pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/corrplot_asa_CH.pdf", height = 5, width = 6)
+corrplot::corrplot(asacorr, is.corr=F, tl.srt=65, p.mat=asap, sig.level = 0.05, insig="pch",
+                   mar=c(0,0,0,0))
+dev.off()
+```
+```{r}
+asacorr
+asap
+```
+
+
+Summary of intake by genotype
+```{r}
+aa<- asa %>% filter(LCT == "AA") %>% summary(.)
+ag<- asa %>% filter(LCT == "AG") %>% summary(.)
+gg<- asa %>% filter(LCT == "GG") %>% summary(.)
+
+summaryBy(Lactose.consumed ~ LCT, data=asa, FUN = list(mean, max, min, median)) %>%
+  htmlTable::htmlTable()
+```
+
+
+plots
+```{r, eval =F}
+
+ggduo(asa, 
+      mapping=aes(color=LNP),
+      columnsX = c("Lactose.consumed","D_TOTAL", "KCAL"),
+      columnsY=c("LNP", "Ethnicity", "age", "sex"),
+      types = list(continuous= "points", comboHorizontal="box"))
+
+ggduo(asa, 
+      mapping=aes(color=LNP),
+      columnsX = c("Lactose.consumed","D_TOTAL", "KCAL"),
+      columnsY=c("ht_cm", "weightv2", "bmi_final"),
+      types = list(continuous= "points", comboHorizontal="box")) +
+  theme_bw()
+
+```
+```{r}
+a<- ggplot(data = asa, aes(x = KCAL, y = Lactose.consumed, color = LNP)) + geom_point(aes(shape = sex), size = 2) + 
+  geom_rug() + theme_bw() + theme(legend.position = "bottom") + ggtitle("Latose (g) vs KCAL")
+b<- ggplot(data = asa, aes(x = KCAL, y = D_TOTAL, color = LNP)) + geom_point(aes(shape = sex), size = 2) + geom_rug() +theme_bw() + theme(legend.position = "bottom") + ggtitle("Total Dairy (cup eq.) vs KCAL")
+#pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/rugplot_asa.pdf", width = 7, height = 5)
+plot_grid(a, b)
+dev.off()
+```
+# Check out distributions
+
+```{r}
+hist(asa$Lactose.consumed)
+hist(asa$D_TOTAL)
+hist(log(asa$D_TOTAL))
+```
+
+
+transform lactose
+```{r transform-lactose}
+library(MASS)
+Box = boxcox(asa$Lactose.consumed ~ 1,              # Transform Turbidity as a single vector
+             lambda = seq(-6,6,0.1))      # Try values -6 to 6 by 0.1
+Cox = data.frame(Box$x, Box$y)            # Create a data frame with the results
+Cox2 = Cox[with(Cox, order(-Cox$Box.y)),] # Order the new data frame by decreasing y
+Cox2[1,]                                  # Display the lambda with the greatest
+                                          #    log likelihood
+lambda = Cox2[1, "Box.x"]                 # Extract that lambda 0.3
+lac_box = (asa$Lactose.consumed ^ lambda - 1)/lambda   # Transform the original data
+hist(lac_box)
+shapiro.test(lac_box) #p-value = 0.06158
+asa$lac_box<-lac_box
+```
+
+transform d_total
+```{r transform-dtotal}
+#there are some 0s 
+library(rcompanion)
+total_tukey<- transformTukey(asa$D_TOTAL)
+asa$total_tukey<-total_tukey
+
+```
+transform kcal
+
+NOTE- we will use a lambda= 0.3 to transform KCAL to keep the lambdas the same between kcal and lactose; this will make back transformation of emmeans easier. 
+the 'best' lambda by searching below is 0.2
+
+```{r}
+asa$kcal_box<- (asa$KCAL ^ 0.3 - 1) / 0.3
+```
+
+```{r, eval = F}
+Box = boxcox(asa$KCAL ~ 1,    # Transform as a single vector
+             lambda = seq(-6,6,0.1))      # Try values -6 to 6 by 0.1
+Cox = data.frame(Box$x, Box$y)            # Create a data frame with the results
+Cox2 = Cox[with(Cox, order(-Cox$Box.y)),] # Order the new data frame by decreasing y
+Cox2[1,]                                  # Display the lambda with the greatest
+                                          #    log likelihood
+lambda = Cox2[1, "Box.x"]                 # Extract that lambda 0.2
+kcal_box = (asa$KCAL ^ lambda - 1)/lambda   # Transform the original data
+hist(kcal_box)
+shapiro.test(kcal_box) #p-value = .6298
+asa$kcal_box<-kcal_box
+```
+# Are there differences among sex and ethnicity? 
+
+```{r}
+make_boxplots<- function(x, y, dat, y_transformed){
+  varx = dat[,x]
+  vary = dat[,y]
+  y_trans = dat[,y_transformed]
+  p<- ggplot(data = dat, aes(x = varx, y = vary)) + geom_boxplot(aes(fill = varx), varwidth = T, notch = T) + theme_bw() +
+    xlab(x) + ylab(y)
+  print(p)
+  fit<-lm(y_trans~varx, data = dat)
+  plot(fit)
+  #summary(fit) %>% print()
+  car::Anova(fit) %>% print()
+}
+
+#no significant differences among ethnicities
+make_boxplots(dat = asa, y = "KCAL", x = "Ethnicity", y_transformed = "kcal_box")#0.9163
+make_boxplots(dat = asa, y = "D_TOTAL", x = "Ethnicity", y_transformed = "total_tukey") #0.5005
+make_boxplots(dat = asa, y = "Lactose.consumed", x = "Ethnicity", y_transformed = "lac_box")#0.258
+
+
+make_boxplots(dat = asa, y = "KCAL", x = "sex", y_transformed = "kcal_box") 
+#men consumed significantly more kcal than women; p-value: 1.993e-15
+make_boxplots(dat = asa, y = "D_TOTAL", x = "sex", y_transformed = "total_tukey") 
+#men consumed significantly more total dairy than women; p-value = 0.001864 
+make_boxplots(dat = asa, y = "Lactose.consumed", x = "sex", y_transformed = "lac_box")
+#difference in consumption approached significance; p-value 0.06473
+```
+```{r}
+a<- ggplot(data = asa, aes(x = Ethnicity, y = Lactose.consumed)) + geom_boxplot(aes(fill=Ethnicity)) + theme_bw() + theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust=1, hjust = 1))
+b<- ggplot(data = asa, aes(x = Ethnicity, y = D_TOTAL)) + geom_boxplot(aes(fill=Ethnicity)) + theme_bw() + theme(legend.position  = "none", axis.text.x = element_text(angle = 45, vjust=1, hjust = 1))
+plot_grid(a,b)
+```
+
+
+```{r plot-lactosevdtotal}
+p<-ggplot(data=asa, aes(x= D_TOTAL, y = Lactose.consumed)) + geom_point(aes(shape=sex, color = LNP), size = 2) + theme_bw() + 
+  ggtitle("Average Lactose Consumption vs Dairy Intake ") + ylab("Estimated Lactose Consumption (g)") +
+  xlab("Total Dairy Consumption (servings)") + geom_smooth(method="lm", se=F, col= "darkgray", linetype="dashed") + 
+  theme(legend.position = "bottom", 
+        plot.title = element_text(hjust=0.5),
+        legend.title = element_blank())
+p
+#ggsave(p,file = "/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/scatter_asa_lactose_dtotal.pdf", height=5, width=6, units="in", dpi=300)
+```
+
+# Does Lactose consumption significantly differ between LP and LNP (all subjects)? 
+```{r}
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/interaction_asa_lac_kcal_CH.pdf", width = 4, height =3)
+ggplot(data = asa, aes(x = KCAL, y = Lactose.consumed, color = LNP)) + geom_point(aes(fill = LNP)) + 
+  geom_smooth(method = "lm", se = F, aes(color = LNP)) + theme_bw()
+dev.off()
+ggplot(data = asa, aes(x = KCAL, y = D_TOTAL, color = LNP)) + geom_point(aes(fill = LNP)) + 
+  geom_smooth(method = "lm", se = F, aes(color = LNP)) + theme_bw()
+```
+
+adapted from https://stats.oarc.ucla.edu/r/seminars/interactions-r/#s4 
+```{r}
+bctran <- make.tran("boxcox", 0.3)
+lac_bc <- with(bctran, 
+                lm(linkfun(Lactose.consumed) ~ linkfun(KCAL)*LNP, data = asa))
+summary(lac_bc)
+
+
+
+lac_fit<- lm(lac_box ~ kcal_box * LNP, data = asa)
+plot(lac_fit) #looks good
+hist(lac_fit$residuals) #looks good
+summary(lac_fit) #LNP is the reference level
+# intercept: when kcal_box is 0 and the ref group is LNP then lac_box is 1.62
+# b1 kcal-box: the simple slope for kcal_box for LNP is 0.037 
+# b2 LP: the simple effect of LNP status (the diference in lac_box between LP and LNP when kcal = 0) is -4.52
+# interaction: the difference in the simple slopes of kcal_box for LP vs LNP 
+```
+#getting the simple slopes for each level of the categorical moderator (LNP)
+```{r}
+emtrends(lac_bc, ~LNP, var = "KCAL")
+#the simple slope for LNP is 0.037 (same as b1) and for males it is 0.206 = 0.037 + 0.169; the 95% CI contains 0 for LNP so the simple slope is significant for LNP but not LP
+emtrends(lac_fit, pairwise ~ LNP, var="kcal_box")
+emmip(lac_fit, LNP ~ kcal_box, cov.reduce = range)
+
+```
+
+```{r}
+emtrends(lac_bc, pairwise~LNP, var = "KCAL", type = "response")
+emmip(lac_bc, LNP ~ KCAL, cov.reduce = range)
+
+```
+
+
+Does total dairy consumption significantly differ between LP and LNP subjects?
+```{r}
+dairy_fit <- lm(total_tukey ~ kcal_box+LNP, data = asa) #no significant interaction, so we keep the simple model
+plot(dairy_fit)
+hist(dairy_fit$residuals)
+summary(dairy_fit)
+Anova(dairy_fit)
+```
+since it's kind of difficult to interpret from a biological perspective, whether lactose consumption was different between LP and LNP, we'll do a simple t test. in the discussion, it makes sense to talk about this first then get into the interactions
+
+```{r}
+t.test(data = asa, lac_box ~ LNP, alternative = "two.sided") #0.01378
+t.test(data = asa, total_tukey ~ LNP, alternative = "two.sided") #0.08826
+```
+
+
+```{r eval = F}
+a<- ggplot(data = asa, aes(x = LNP, y = Lactose.consumed)) + geom_boxplot(aes(fill = LNP), varwidth=T, notch=T ) + theme_bw() + theme(legend.position ="none")
+b<- ggplot(data = asa, aes(x = LNP, y = D_TOTAL)) + geom_boxplot(aes(fill = LNP), varwidth=T, notch=T ) + theme_bw() + theme(legend.position ="none")
+pdf("/Users/elizabeth.chin/Desktop/milk/FL100_lactose_lct_16s/plots/boxplots_asa_lac_dairy_lnp_CH.pdf", width = 7, height = 5)
+plot_grid(a, b)
+dev.off()
+```
+Average consumption (raw data, not the estimated/adjusted mean)
+```{r}
+asa %>% group_by(LNP) %>% 
+  summarize(mean_lactose = round(mean(Lactose.consumed),2),
+            mean_dairy = round(mean(D_TOTAL),2)) %>% htmlTable::htmlTable()
+```
+
+###
+
+```{r}
+fit<- lm(lac_box ~ LNP, data = asa)
+plot(fit)
+summary(fit)
+stats::confint(fit)
+
+fit_controlled <- lm(lac_box ~ LNP+kcal_box, asa) #no significant interaction so keep it as + only
+plot(fit_controlled)
+summary(fit_controlled)
+stats::confint(fit_controlled)
+
+```
+
+
+
+does lactose intake differ between men and women?    
+(expectation: yes, because men more likely to have overall greater intake than women)    
+
+Lactose intake does not significantly differ between men and women (p = 0.07, two sided t test)
+```{r lactose-sex}
+t.test(lac_box ~ sex, data=asa) #p-value = 0.07436
+ggplot(data=asa, aes(x= sex, y = Lactose.consumed)) + geom_boxplot(varwidth=T, notch=T, aes(fill=sex)) + theme_bw()
+
+```
+
+
+
+Does total dairy differ between men and women?
+```{r dtotal-sex}
+fit<-(lm(total_tukey ~ LNP*factor(sex), data=asa))
+plot(fit)
+
+Anova(lm(lac_box ~ sex*LCT, data = asa))
+
+Anova(lm(lac_box ~ kcal_box + LNP, data = asa %>% filter(sex == 1)))
+```
+
+
+
+```{r scatterplot-metadata}
+for(i in 5:9){
+  #filepath=paste("/Users/elizabeth.chin/Desktop/milk/DXA/plots_102419/genotype_sex/","genotypesex_vs_",colnames(cd)[i],".png",sep="")
+  k<- colnames(asa[i])
+  d<-data.frame(Subject=factor(asa$SubjectID),
+                Genotype=asa$LCT,
+                var=asa[,i],
+                Lactose=asa$Lactose.consumed,
+                Sex=factor(asa$sex))
+  q<- ggplot(d, aes(x= var, y= Lactose)) + 
+    geom_point(aes(color=Genotype, shape = Sex), size=3)+
+    geom_sasath(method="lm", se=F)+
+    theme_bw() + xlab(print(k)) + 
+    ylab("Lactose") +
+    #facet_wrap(~Sex)+
+    ggtitle(paste0(k," vs Lactose")) +
+    #stat_summary(fun.y=mean, geom="point", shape=17, size=4)+
+    theme(plot.title = element_text(size=22),
+          axis.title.x = element_text(size=22), 
+          axis.title.y = element_text(size=22))
+  print(q) 
+  #ggsave(file=filepath, plot=q, width=10, height=10)
+}
+
+for(i in c(5,7:9)){
+  #filepath=paste("/Users/elizabeth.chin/Desktop/milk/DXA/plots_102419/genotype_sex/","genotypesex_vs_",colnames(cd)[i],".png",sep="")
+  k<- colnames(asa[i])
+  d<-data.frame(Subject=factor(asa$SubjectID),
+                Genotype=asa$LCT,
+                var=asa[,i],
+                Lactose=asa$Lactose.consumed,
+                Sex=factor(asa$sex))
+  q<- ggplot(d, aes(x= var, y= Lactose)) + 
+    geom_point(aes(color=Genotype), size=3)+
+    geom_sasath(method= "lm", se=F) +
+    theme_bw() + xlab(print(k)) + 
+    ylab("Lactose") +
+    facet_wrap(~Sex, scales="free_x")+
+    ggtitle(paste0(k," vs Lactose")) +
+    #stat_summary(fun.y=mean, geom="point", shape=17, size=4)+
+    theme(plot.title = element_text(size=22),
+          axis.title.x = element_text(size=22), 
+          axis.title.y = element_text(size=22))
+  print(q)
+  #ggsave(file=filepath, plot=q, width=10, height=10)
+}
+```
+
+```{r corrplot-lactose-meta-all}
+library(magicfor)
+magic_for()
+fe<- asa %>% filter(sex == "female")
+ma<- asa %>% filter(sex=="male")
+for(i in c(5,7:9,14)){
+  #all
+  lac<- asa$lac_box
+  var<- asa[,i]
+  k<- colnames(asa)[i]
+  all.corr<-cor.test(lac, var, method="pearson", alternative="two.sided")
+  all.pcc<- round(all.corr$estimate,3)
+  all.pval<- round(all.corr$p.value,3)
+  #females
+  lac.f<- fe$lac_box
+  var.f<- fe[,i]
+  fe.corr<-cor.test(lac.f, var.f, method="pearson", alternative="two.sided")
+  fe.pcc<- round(fe.corr$estimate,3)
+  fe.pval<- round(fe.corr$p.value,3)
+  #males
+  lac.m<- ma$lac_box
+  var.m<- ma[,i]
+  ma.corr<-cor.test(lac.m, var.m, method="pearson", alternative="two.sided")
+  ma.pcc<- round(ma.corr$estimate,3)
+  ma.pval<- round(ma.corr$p.value,3)
+  #put
+  put(k, all.pcc, fe.pcc, ma.pcc,
+      all.pval, fe.pval, ma.pval)
+}
+
+cor_res<- magic_result_as_dataframe(F)
+cor_res<- cor_res %>% tibble::column_to_rownames(var="k")
+
+pcc<- cor_res %>% dplyr::select(all.pcc:ma.pcc)
+pval<- cor_res %>% dplyr::select(all.pval:ma.pval)
+colnames(pcc)<-c("All (n = 285)", "Women (n = 154)", "Men (n = 131)")
+rownames(pcc)<- c("Age", "Height (cm)", "Weight (kg)", "BMI", "Kcal")
+
+#png(filename="../plots/asa24/corrplot_lactose_metadata_all.png", units="in", height=4, width=5, res=300)
+corrplot::corrplot(t(pcc), is.corr=F, tl.srt=65, p.mat=t(pval), sig.level = 0.05, insig="pch",
+                   addCoef.col = "black",
+                   title = "            Metadata and Lactose Consumption\nPearson's correlation",
+                   mar=c(0,0,4,1))
+#dev.off()
+```
+
+```{r scatterplot-kcalmeta}
+for(i in c(5,7:9)){
+  #filepath=paste("/Users/elizabeth.chin/Desktop/milk/DXA/plots_102419/genotype_sex/","genotypesex_vs_",colnames(cd)[i],".png",sep="")
+  k<- colnames(asa[i])
+  d<-data.frame(Subject=factor(asa$SubjectID),
+                Genotype=asa$LCT,
+                var=asa[,i],
+                kcal=asa$kcal,
+                Sex=factor(asa$sex))
+  q<- ggplot(d, aes(x= var, y= kcal)) + 
+    geom_point(aes(color=Genotype), size=3)+
+    geom_sasath(method= "lm", se=F) +
+    theme_bw() + xlab(print(k)) + 
+    ylab("Kcal") +
+    facet_wrap(~Sex, scales="free_x")+
+    ggtitle(paste0(k," vs Total Intake (Kcal)")) +
+    #stat_summary(fun.y=mean, geom="point", shape=17, size=4)+
+    theme(plot.title = element_text(size=22),
+          axis.title.x = element_text(size=22), 
+          axis.title.y = element_text(size=22))
+  print(q)
+  #ggsave(file=filepath, plot=q, width=10, height=10)
+}
+```
+
+Boxplot of height, age, and lactose intake by LCT genotype
+
+```{r boxplot-genotype}
+ggplot(data=asa, aes(x= age, y = ht_cm)) + geom_point(aes(color=LCT)) + theme_bw() + facet_wrap(~sex)
+ggplot(data = asa, aes(x= LCT, y = ht_cm)) + geom_boxplot(aes(fill=LCT)) + facet_wrap(~sex)
+ggplot(data=asa, aes(x = LCT, y = Lactose.consumed)) + geom_boxplot(aes(fill=LCT)) + facet_wrap(~sex)
+```
+
+
+
+```{r summaryse}
+## Summarizes data.
+## Gives count, mean, standard deviation, standard error of the mean, and confidence 
+## interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE, conf.interval=.95) {
+    library(doBy)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # Collapse the data
+    formula <- as.formula(paste(measurevar, paste(groupvars, collapse=" + "), sep=" ~ "))
+    datac <- summaryBy(formula, data=data, FUN=c(length2,mean,sd), na.rm=na.rm)
+
+    # Rename columns
+    names(datac)[ names(datac) == paste(measurevar, ".mean",    sep="") ] <- measurevar
+    names(datac)[ names(datac) == paste(measurevar, ".sd",      sep="") ] <- "sd"
+    names(datac)[ names(datac) == paste(measurevar, ".length2", sep="") ] <- "N"
+    
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+    
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+    
+    return(datac)
+}
+```
+
+Barplots of lactose and total dairy intake for ALL SUBJECTS
+
+```{r barplots-genotype}
+df<- summarySE(data=asa, measurevar="Lactose.consumed", groupvars="LCT")
+ggplot(data=df, aes(x= LCT, y = Lactose.consumed)) + geom_bar(aes(fill = LCT), stat="identity") + 
+  geom_errorbar(aes(ymax = Lactose.consumed + se, ymin = Lactose.consumed-se), width=0.2) + 
+  theme_bw() + ggtitle("Average lactose consumed +/- SE")
+
+df2<- summarySE(data=asa, measurevar="d_total", groupvars="LCT")
+ggplot(data=df2, aes(x= LCT, y = d_total)) + geom_bar(aes(fill = LCT), stat="identity") + 
+  geom_errorbar(aes(ymax = d_total + se, ymin = d_total-se), width=0.2) + 
+  theme_bw() + ggtitle("Average Dairy Servings +/- SE")
+
+df3<- summarySE(data=asa, measurevar="lac.kcal", groupvars="LCT")
+ggplot(data=df3, aes(x= LCT, y = lac.kcal)) + geom_bar(aes(fill = LCT), stat="identity") + 
+  geom_errorbar(aes(ymax = lac.kcal + se, ymin = lac.kcal-se), width=0.2) + 
+  theme_bw() + ggtitle("Average lactose/kcal consumed +/- SE")
+
+df4<- summarySE(data=asa, measurevar="dairy.kcal", groupvars="LCT")
+ggplot(data=df4, aes(x= LCT, y = dairy.kcal)) + geom_bar(aes(fill = LCT), stat="identity") + 
+  geom_errorbar(aes(ymax = dairy.kcal + se, ymin = dairy.kcal-se), width=0.2) + 
+  theme_bw() + ggtitle("Average Dairy/KCal +/- SE")
+```
+
+check if lactose consumption varies with ethnicity (determines if we need to exclude some ethnicities)  
+
+all ethnicities (including multi-racial subjects)
+```{r boxplot-lactose-eth}
+ggplot(data=asa, aes(x = Ethnicity, y = Lactose.consumed)) + geom_boxplot(aes(fill=Ethnicity),varwidth = T) + theme_bw()
+ggplot(data=asa, aes(x = Ethnicity, y = d_total)) + geom_boxplot(aes(fill=Ethnicity),varwidth=T) + theme_bw()
+
+Anova(fit<- lm(lac_box ~ kcal_box + Ethnicity, data=asa)) #0.01036
+plot(fit)
+Anova(fit2<- lm(total_tukey ~ kcal_box+ Ethnicity, data=asa)) #.03193
+plot(fit2)
+
+library(emmeans)
+pairs(emm<- emmeans(fit2, "Ethnicity"))
+#contrast                     estimate    SE  df t.ratio p.value
+# Asian - Caucasian             -0.2575 0.0801 278 -3.215  0.0181
+
+```
+
+exclude multi-racial and & Other subjects  
+```{r lm-eth}
+dat<- asa %>% filter(Ethnicity != "Other" & Ethnicity != "Multi") #259 subjects
+Anova(fit<- lm(lac_box ~ kcal_box + weightv2+ Ethnicity, data=dat)) #0.003846
+plot(fit)
+pairs(emmeans(fit, "Ethnicity"))
+#Asian - Caucasian            -0.94939 0.318 253 -2.990  0.0161 
+
+Anova(fit2<- lm(lac_box ~ Ethnicity, data=dat)) #0.001782
+pairs(emmeans(fit2, "Ethnicity"))
+# Asian - Caucasian              -1.217 0.324 255 -3.760  0.0012 
+```
+
+Does total dairy consumption differ between ethnicities?
+
+```{r dtotal-eth}
+Anova(fit<- lm(total_tukey ~ kcal_box + weightv2+ Ethnicity, data=dat)) #0.0249800 *
+plot(fit)
+pairs(emmeans(fit, "Ethnicity"))
+#Asian - Caucasian             -0.1928 0.0790 253 -2.441  0.0721
+
+Anova(fit2<- lm(total_tukey ~ Ethnicity, data=dat)) #0.00262 **
+pairs(emmeans(fit2, "Ethnicity"))
+#Asian - Caucasian             -0.3243 0.0874 255 -3.710  0.0014 
+```
+
+
+what about if we just use Caucasians and Hispanics?   
+```{r make-ch}
+ch<- asa %>% filter(Ethnicity == "Caucasian" | Ethnicity == "Hispanic") #n=215
+summary(ch)
+```
+
+get the summary for each genotype
+
+```{r summary-ch}
+a<- aggregate(cbind(d_total, Lactose.consumed) ~ LCT, data=ch, FUN="mean")
+b<- aggregate(cbind(d_total, Lactose.consumed) ~ LCT, data=ch, FUN="median")
+c<- aggregate(cbind(d_total, Lactose.consumed) ~ LCT, data=ch, FUN="min")
+d<- aggregate(cbind(d_total, Lactose.consumed) ~ LCT, data=ch, FUN="max")
+
+colnames(a)<-c("LCT", "mean_dairy", "mean_lactose")
+colnames(b)<-c("LCT", "median_dairy", "median_lactose")
+colnames(c)<-c("LCT", "min_dairy", "min_lactose")
+colnames(d)<-c("LCT", "max_dairy", "max_lactose")
+df<- merge(merge(merge(a, b, by = "LCT"),c, by = "LCT"), d, by = "LCT")
+htmlTable::htmlTable(df)
+
+ch %>% group_by("LCT") %>% do(data.frame(summary(.)))
+
+
+aa<- ch %>% filter(LCT == "AA") %>% dplyr::select(d_total, Lactose.consumed) %>% summary(.) 
+ag<- ch %>% filter(LCT == "AG") %>% dplyr::select(d_total, Lactose.consumed) %>% summary(.)
+gg<- ch %>% filter(LCT == "GG") %>% dplyr::select(d_total, Lactose.consumed) %>% summary(.)
+
+cbind(aa, ag, gg) %>% htmlTable::htmlTable()
+
+ggplot(data=ch, aes(x= LCT, y = Lactose.consumed)) + geom_boxplot(aes(fill=LCT)) + geom_jitter(width=.25, col= "blue")
+
+#how many LNP had lactose consumption > 20? 
+ch %>% filter(Lactose.consumed >= 12) %>% plyr::count(., "LCT") #16 GG
+ch %>% filter(Lactose.consumed >= 15) %>% plyr::count(., "LCT") #7 GG
+ch %>% filter(Lactose.consumed >= 20) %>% plyr::count(., "LCT") #2 GG
+
+#total n caucasians and hispanics per genotype
+plyr::count(ch, "LCT")
+#AA: 62
+#AG: 92
+#GG: 61 
+```
+
+correlation of d_total and lactose among caucasians and hispanics
+```{r cor-ch}
+cor.test(ch$total_tukey, ch$lac_box, method="pearson", alternative="two.sided")
+```
+
+```{r ch-lactosevdtotal}
+p<-ggplot(data=ch, aes(x= d_total, y = Lactose.consumed)) + geom_point(aes(color=LCT), size = 2) + theme_bw() + 
+  ggtitle("Average Lactose Consumption vs Dairy Intake ") + ylab("Estimated Lactose Consumption (g)") +
+  xlab("Total Dairy Consumption (servings)") + geom_sasath(method="lm", se=F, col= "darkgray", linetype="dashed") + 
+  theme(legend.position = "bottom", 
+        plot.title = element_text(hjust=0.5))
+ggsave(p,file = "../plots/asa24/lactose_vs_dtotal_ch.png", height=4, width=5, units="in", dpi=300)
+```
+
+```{r ch-jitter}
+for.plot<-ch
+library(plotly)
+shapes<- c("circle", "cross")
+for.plot$shapes<- shapes[for.plot$sex]
+for.plot$col<- rainbow(3)[for.plot$LCT]
+
+plot_ly(data=ch, x = ~Lactose.consumed, type="scatter",
+        text=~paste("Subject:",SubjectID,
+                    "<br>Ethnicity:", Ethnicity,
+                    "<br>Age:", age,
+                    "<br>BMI:", bmi_final),
+        color=~LCT, 
+        symbol= ~sex,
+        size=3) %>% 
+  layout(xaxis=list(
+    title="Average Lactose Consumed (g)"), 
+    yaxis= list(
+      title="Random Jitter"), 
+    title="Average Lactose Consumed for \nCaucasian and Hispanic Subjects (n = 215)"
+  )
+
+```
+
+```{r scatterplot-kcal-metadata-ch}
+for(i in c(5,7:9)){
+  #filepath=paste("/Users/elizabeth.chin/Desktop/milk/DXA/plots_102419/genotype_sex/","genotypesex_vs_",colnames(cd)[i],".png",sep="")
+  k<- colnames(ch[i])
+  d<-data.frame(Subject=factor(ch$SubjectID),
+                Genotype=ch$LCT,
+                var=ch[,i],
+                kcal=ch$kcal,
+                Sex=factor(ch$sex))
+  q<- ggplot(d, aes(x= var, y= kcal)) + 
+    geom_point(aes(color=Genotype), size=3)+
+    geom_sasath(method= "lm", se=F) +
+    theme_bw() + xlab(print(k)) + 
+    ylab("Kcal") +
+    facet_wrap(~Sex, scales="free_x")+
+    ggtitle(paste0(k," vs Total Intake (Kcal) in Caucasians and Hispanics")) +
+    #stat_summary(fun.y=mean, geom="point", shape=17, size=4)+
+    theme(plot.title = element_text(size=22),
+          axis.title.x = element_text(size=22), 
+          axis.title.y = element_text(size=22))
+  print(q)
+  #ggsave(file=filepath, plot=q, width=10, height=10)
+}
+```
+
+
+```{r lm-eth-ch}
+
+Anova(fit<- lm(lac_box ~ kcal_box + Ethnicity, data=ch)) #0.2617
+plot(fit)
+Anova(fit2<- lm(kcal_box ~ Ethnicity, data=ch)) #0.8963
+plot(fit2)
+ggplot(data=ch, aes(x = Ethnicity, y = Lactose.consumed)) + geom_boxplot(aes(fill=Ethnicity),varwidth = T) + theme_bw()
+ggplot(data=ch, aes(x = kcal, y = Lactose.consumed)) + geom_point(aes(color=Ethnicity)) + theme_bw()
+
+```
+
+```{r cortest-rawvalues-ch}
+for(i in c(5,7:9,14)){
+  k<- colnames(ch)[i]
+  var<- ch[,i]
+  lac<- ch$lac_box
+  c<-cor.test(lac, var, alternative="two.sided", method="pearson")
+  print(k)
+  print(c)
+}
+
+#women only
+fe<- ch %>% filter(sex=="female")
+for(i in c(5,7:9,14)){
+  k<- colnames(fe)[i]
+  var<- fe[,i]
+  lac<- fe$lac_box
+  c<-cor.test(lac, var, alternative="two.sided", method="pearson")
+  print(k)
+  print(c)
+}
+
+ma<- ch %>% filter(sex=="male")
+for(i in c(5,7:9,14)){
+  k<- colnames(ma)[i]
+  var<- ma[,i]
+  lac<- ma$lac_box
+  c<-cor.test(lac, var, alternative="two.sided", method="pearson")
+  print(k)
+  print(c)
+}
+
+#just to be sure
+Anova(fit<-lm(kcal_box ~ age, data=ch)) #0.5881
+plot(fit)
+```
+
+
+
+
+```{r corrplot-lactose-meta-ch}
+library(magicfor)
+magic_for()
+fe<- ch %>% filter(sex == "female")
+ma<- ch %>% filter(sex=="male")
+for(i in c(5,7:9,14)){
+  #all
+  lac<- ch$lac_box
+  var<- ch[,i]
+  k<- colnames(ch)[i]
+  all.corr<-cor.test(lac, var, method="pearson", alternative="two.sided")
+  all.pcc<- round(all.corr$estimate,3)
+  all.pval<- round(all.corr$p.value,3)
+  #females
+  lac.f<- fe$lac_box
+  var.f<- fe[,i]
+  fe.corr<-cor.test(lac.f, var.f, method="pearson", alternative="two.sided")
+  fe.pcc<- round(fe.corr$estimate,3)
+  fe.pval<- round(fe.corr$p.value,3)
+  #males
+  lac.m<- ma$lac_box
+  var.m<- ma[,i]
+  ma.corr<-cor.test(lac.m, var.m, method="pearson", alternative="two.sided")
+  ma.pcc<- round(ma.corr$estimate,3)
+  ma.pval<- round(ma.corr$p.value,3)
+  #put
+  put(k, all.pcc, fe.pcc, ma.pcc,
+      all.pval, fe.pval, ma.pval)
+}
+
+cor_res<- magic_result_as_dataframe(F)
+cor_res<- cor_res %>% tibble::column_to_rownames(var="k")
+
+pcc<- cor_res %>% dplyr::select(all.pcc:ma.pcc)
+pval<- cor_res %>% dplyr::select(all.pval:ma.pval)
+colnames(pcc)<-c("All (n = 215)", "Women (n = 117)", "Men (n = 98)")
+rownames(pcc)<- c("Age", "Height (cm)", "Weight (kg)", "BMI", "Kcal")
+
+png(filename="../plots/asa24/corrplot_lactose_metadata.png", units="in", height=4, width=5, res=300)
+corrplot::corrplot(t(pcc), is.corr=F, tl.srt=65, p.mat=t(pval), sig.level = 0.05, insig="pch",
+                   addCoef.col = "black",
+                   title = "            Caucasian and Hispanic\nMetadata and Lactose Consumption\nPearson's correlation",
+                   mar=c(0,0,4,1))
+dev.off()
+```
+
+
+
+```{r corrplot-kcal-meta-ch}
+magic_for()
+for(i in c(5,7:9)){
+  #all
+  kcal<- ch$kcal_box
+  var<- ch[,i]
+  k<- colnames(ch)[i]
+  all.corr<-cor.test(kcal, var, method="pearson", alternative="two.sided")
+  all.pcc<- round(all.corr$estimate,3)
+  all.pval<- round(all.corr$p.value,3)
+  #females
+  kcal.f<- fe$kcal_box
+  var.f<- fe[,i]
+  fe.corr<-cor.test(kcal.f, var.f, method="pearson", alternative="two.sided")
+  fe.pcc<- round(fe.corr$estimate,3)
+  fe.pval<- round(fe.corr$p.value,3)
+  #males
+  kcal.m<- ma$kcal_box
+  var.m<- ma[,i]
+  ma.corr<-cor.test(kcal.m, var.m, method="pearson", alternative="two.sided")
+  ma.pcc<- round(ma.corr$estimate,3)
+  ma.pval<- round(ma.corr$p.value,3)
+  #put
+  put(k, all.pcc, fe.pcc, ma.pcc,
+      all.pval, fe.pval, ma.pval)
+}
+
+cor_res<- magic_result_as_dataframe(F)
+cor_res<- cor_res %>% tibble::column_to_rownames(var="k")
+
+pcc<- cor_res %>% dplyr::select(all.pcc:ma.pcc)
+pval<- cor_res %>% dplyr::select(all.pval:ma.pval)
+colnames(pcc)<-c("All (n = 215)", "Women (n = 117)", "Men (n = 98)")
+rownames(pcc)<- c("Age", "Height (cm)", "Weight (kg)", "BMI")
+
+png(filename="../plots/asa24/corrplot_kcal_metadata.png", units="in", height=4, width=5, res=300)
+corrplot::corrplot(t(pcc), is.corr=F, tl.srt=65, p.mat=t(pval), sig.level = 0.05, insig="pch",
+                   addCoef.col = "black",
+                   title = "            Caucasian and Hispanic\nMetadata and Total KCal\nPearson's correlation",
+                   mar=c(0,0,4,1))
+dev.off()
+```
+```{r corrplot-dtotal}
+magic_for()
+for(i in c(5,7:9,14)){
+  #all
+  dt<- ch$total_tukey
+  var<- ch[,i]
+  k<- colnames(ch)[i]
+  all.corr<-cor.test(dt, var, method="pearson", alternative="two.sided")
+  all.pcc<- round(all.corr$estimate,3)
+  all.pval<- round(all.corr$p.value,3)
+  #females
+  dt.f<- fe$total_tukey
+  var.f<- fe[,i]
+  fe.corr<-cor.test(dt.f, var.f, method="pearson", alternative="two.sided")
+  fe.pcc<- round(fe.corr$estimate,3)
+  fe.pval<- round(fe.corr$p.value,3)
+  #males
+  dt.m<- ma$total_tukey
+  var.m<- ma[,i]
+  ma.corr<-cor.test(dt.m, var.m, method="pearson", alternative="two.sided")
+  ma.pcc<- round(ma.corr$estimate,3)
+  ma.pval<- round(ma.corr$p.value,3)
+  #put
+  put(k, all.pcc, fe.pcc, ma.pcc,
+      all.pval, fe.pval, ma.pval)
+}
+
+cor_res<- magic_result_as_dataframe(F)
+cor_res<- cor_res %>% tibble::column_to_rownames(var="k")
+
+pcc<- cor_res %>% dplyr::select(all.pcc:ma.pcc)
+pval<- cor_res %>% dplyr::select(all.pval:ma.pval)
+colnames(pcc)<-c("All (n = 215)", "Women (n = 117)", "Men (n = 98)")
+rownames(pcc)<- c("Age", "Height (cm)", "Weight (kg)", "BMI", "Kcal")
+
+png(filename="../plots/asa24/corrplot_dtotal_metadata.png", units="in", height=4, width=5, res=300)
+corrplot::corrplot(t(pcc), is.corr=F, tl.srt=65, p.mat=t(pval), sig.level = 0.05, insig="pch",
+                   addCoef.col = "black",
+                   title = "            Caucasian and Hispanic\nMetadata and Total Dairy\nPearson's correlation",
+                   mar=c(0,0,4,1))
+dev.off()
+```
+
+
+Do any of the metadata significantly differ among Genotypes?   
+Height significantly differs among genotypes  
+```{r}
+for(i in c(5,7:9)){
+  k<- colnames(ch)[i]
+  var<- ch[,i]
+  fit<- kruskal.test(var ~ LCT, data=ch)
+  print(k)
+  print(fit)
+  #plot(fit, main=paste(k))
+  #plot(fit$residuals, main=paste(k))
+}
+
+pairwise.wilcox.test(ch$ht_cm, ch$LCT, p.adjust.method="BH")
+ggplot(data=ch, aes(x=LCT, y = ht_cm)) + geom_boxplot() #AA and AG subjects are significantly taller than GG subjects
+
+#linear
+Anova(fit<- lm(log(ht_cm) ~ LCT, data=ch))
+plot(fit)
+hist(fit$residuals)
+Anova(fit2<- lm(log(ht_cm) ~ kcal_box + lac_box, data=ch))
+#mediation
+Anova(fit3<- lm(log(ht_cm) ~ lac_box + LCT, data=ch ))
+```
+
+
+does lactose consumption differ among genotypes   
+
+all subjects
+```{r lm-lactose-lct}
+
+#all subjects, base model
+Anova(fit<-lm(lac_box ~ LCT, data=asa))
+#LCT        49.19   2  8.4103 0.0002833 ***
+plot(fit)
+Anova(fit1<-lm(lac_box ~ LCT*sex, data=asa)) #no significant interaction
+#LCT        45.97   2  7.9695 0.0004307 ***
+#sex         7.62   1  2.6440 0.1050696    
+#LCT:sex    12.53   2  2.1717 0.1159046    
+Anova(fit2<-lm(lac_box ~ sex + LCT, data=asa))
+#sex         7.62   1  2.6221 0.1065036    
+#LCT        45.97   2  7.9036 0.0004577 ***
+
+#all  single-ethnicity subjects, base with ethnicity and genotype
+Anova(fit.base<-lm(lac_box ~ Ethnicity + LCT, data=dat))
+#        Sum Sq  Df F value  Pr(>F)  
+#Ethnicity  16.08   3  1.8441 0.13963  
+#LCT        24.17   2  4.1576 0.01673 *
+
+#full model for single-ethnicity subjects: 
+Anova(fit5<-lm(lac_box ~ kcal_box + log(weightv2)+Ethnicity + LCT, data=dat))
+#kcal_box       51.71   1 19.3854 1.582e-05 ***
+#log(weightv2)   3.66   1  1.3724    0.2425    
+#Ethnicity      12.67   3  1.5833    0.1939    
+#LCT            15.36   2  2.8798    0.0580 .  
+plot(fit5)
+hist(fit5$residuals)
+
+
+#all subjects, full model:
+Anova(fit8<-lm(lac_box ~ kcal_box + log(weightv2) + LCT, data=asa)) #0.003475
+plot(fit8)
+hist(fit8$residuals)
+pairs(emmeans(fit8, "LCT"))
+# contrast estimate    SE  df t.ratio p.value
+# AA - AG     0.558 0.256 280 2.182   0.0760 
+# AA - GG     0.864 0.254 280 3.399   0.0022 
+# AG - GG     0.306 0.221 280 1.388   0.3488  
+Anova(fita<-lm(lac_box ~ LCT, data=asa))
+pairs(emmeans(fita, "LCT"))
+```
+
+all subjects- subset by sex, lactose
+
+```{r}
+fe.all<- asa %>% filter(sex == "female")
+ma.all<- asa %>% filter(sex == "male")
+#all females, full model
+Anova(fit.f<- lm(lac_box ~ kcal_box + log(weightv2) + LCT, data=fe.all)) #0.362850  
+plot(fit.f)
+hist(fit.f$residuals)
+
+#all males, full model
+Anova(fit.m<- lm(lac_box ~ kcal_box + log(weightv2) + LCT, data=ma.all)) # 0.003131
+plot(fit.m)
+pairs(emmeans(fit.m, "LCT"))
+# AA - AG     0.992 0.387 126 2.561   0.0310 
+# AA - GG     1.330 0.392 126 3.394   0.0026 
+```
+
+
+caucasian only- lactose
+```{r}
+#caucasian and hispanics, basemodel 
+Anova(fit.basech<-lm(lac_box ~ LCT, data=ch)) #0.006989 **
+pairs(emmeans(fit.basech, "LCT"))
+# AA - GG     0.926 0.294 212 3.154   0.0052 
+
+#there is no interaction with sex
+Anova(mod<- lm(lac_box ~ kcal_box + sex*LCT, data=ch))
+
+#caucasian and hispanics, full model: 
+Anova(fit2<- lm(lac_box ~ log(weightv2) + kcal_box + LCT, data=ch))
+#log(weightv2)   2.26   1  0.9407   0.33322    
+#kcal_box       47.08   1 19.5998 1.535e-05 ***
+#LCT            18.01   2  3.7491   0.02513 *  
+plot(fit2)
+hist(fit2$residuals)
+emmeans(fit2, "LCT")
+#LCT emmean    SE  df lower.CL upper.CL
+# AA    3.59 0.197 210     3.20     3.98
+# AG    3.07 0.162 210     2.75     3.39
+# GG    2.84 0.202 210     2.45     3.24
+pairs(emmeans(fit2, "LCT"))
+# contrast estimate    SE  df t.ratio p.value
+# AA - AG     0.520 0.255 210 2.039   0.1055 
+# AA - GG     0.749 0.283 210 2.644   0.0238 
+# AG - GG     0.228 0.258 210 0.886   0.6497 
+```
+
+Caucasian men and women subsets- lactose
+```{r}
+fe<- ch %>% filter(sex == "female")
+ma<- ch %>% filter(sex == "male")
+#women
+Anova(fit3<- lm(lac_box ~ log(weightv2) + kcal_box + LCT, data=fe)) #no significant differences
+#log(weightv2)   7.562   1  3.7276 0.05605 .
+#kcal_box        4.714   1  2.3236 0.13024  
+#LCT             3.323   2  0.8190 0.44351  
+#Residuals     227.211 112   
+plot(fit3)
+hist(fit3$residuals)
+
+#men
+Anova(fit4<- lm(lac_box ~ log(weightv2) + kcal_box + LCT, data=ma))
+#log(weightv2)   0.149  1  0.0554   0.8144    
+#kcal_box       53.246  1 19.8423 2.34e-05 ***
+#LCT            24.254  2  4.5191   0.0134 * 
+plot(fit4)
+hist(fit4$residuals)
+pairs(emmeans(fit4, "LCT"))
+# AA - AG     0.995 0.381 93 2.609   0.0283 
+# AA - GG     1.151 0.450 93 2.558   0.0323 
+# AG - GG     0.156 0.429 93 0.363   0.9301 
+
+```
+
+
+Does genotype influence total dairy intake (servings)?   
+```{r}
+#all subjects, base model
+Anova(fit2<- lm(total_tukey ~ LCT, data=asa)) #0.007869
+plot(fit2)
+pairs(emmeans(fit2, "LCT")) #AA - GG     0.229 0.0738 282 3.098   0.0061
+Anova(fit2<- lm(total_tukey ~ LCT*sex, data=asa)) #no significant interaction
+Anova(fit2<- lm(total_tukey ~ sex + LCT, data=asa)) 
+
+#all subjects, full model
+Anova(fit3<- lm(total_tukey ~ log(weightv2) + kcal_box + LCT, data=asa)) #0.1393189
+plot(fit3)
+hist(fit3$residuals)
+
+#all single-eth subjects, full model
+Anova(fit.all<- lm(total_tukey ~ log(weightv2) + kcal_box + Ethnicity + LCT, data=dat)) #0.6399354
+plot(fit.all)
+hist(fit.all$residuals)
+
+#caucasian and hispanics only, full model
+Anova(fit.ch<- lm(total_tukey ~ log(weightv2) + kcal_box + LCT, data=ch)) #0.5867361 
+
+#Caucasian and hispanics only, base model
+Anova(fit.chb<- lm(total_tukey ~ LCT, data=ch)) #0.155 
+
+```
+
+total dairy- subset by sex: 
+```{r}
+#females, all
+Anova(fit.fall<- lm(total_tukey ~ kcal_box + log(weightv2) + LCT, data=fe.all)) #0.6831004
+
+#females, ch
+Anova(fit.fch<- lm(total_tukey ~ kcal_box + log(weightv2) + LCT, data=fe)) #0.7067424
+
+#males, all
+Anova(fit.mall<- lm(total_tukey ~ kcal_box + log(weightv2) + LCT, data=ma.all)) #0.15783
+
+#males, ch
+Anova(fit.mch<- lm(total_tukey ~ kcal_box + log(weightv2) + LCT, data=ma)) #0.44590
+
+plot(fit.fall)
+hist(fit.fall$residuals, breaks=10)
+
+plot(fit.fch)
+hist(fit.fch$residuals, breaks=10)
+
+plot(fit.mall)
+hist(fit.mall$residuals, breaks=10)
+
+plot(fit.mch)
+hist(fit.mch$residuals, breaks=10)
+```
+
+
+
+there are similar results using transformed variables corresponding  to lactose/kcal  and totaldairy/kcal, but I think it's a little easier to interpret/explain an adjusted model instead of a normalized variable.   
+```{r echo=F, eval=F}
+Anova(mod<- lm(lackcal_box ~ LCT, data=ch))
+plot(mod)
+hist(mod$residuals)
+Anova(mod2<- lm(dairykcal_tukey ~ LCT, data=ch))
+```
+
+```{r}
+ggplot(data=asa, aes(x = LCT, y = kcal)) + geom_boxplot()
+Anova(lm(kcal_box ~ LCT, data=asa))
+ggplot(data=asa, aes(x = LNP, y = kcal)) + geom_boxplot()
+Anova(lm(kcal_box ~ LNP, data=asa))
+```
+
+more plots   
+```{r barplot-ch-genotype}
+df<- summarySE(data=ch, measurevar="Lactose.consumed", groupvars="LCT")
+ggplot(data=df, aes(x= LCT, y = Lactose.consumed)) + geom_bar(aes(fill = LCT), stat="identity") + 
+  geom_errorbar(aes(ymax = Lactose.consumed + se, ymin = Lactose.consumed-se), width=0.2) + 
+  theme_bw() + ggtitle("Average lactose consumed by LCT Genotype") +
+  xlab("LCT Genotype") + ylab("Estimated Lactose Consumed +/- SE (g)") +
+  theme(legend.position="none", 
+        plot.title = element_text(hjust=0.5))
+
+ggsave("../plots/asa24/lactose_lct_barplot.png", width=5, height=4, units="in", dpi=300)
+
+df2<- summarySE(data=ch, measurevar="Lactose.consumed", groupvars=c("sex", "LCT"))
+ggplot(data=df2, aes(x= LCT, y = Lactose.consumed)) + geom_bar(aes(fill = LCT), stat="identity") + 
+  geom_errorbar(aes(ymax = Lactose.consumed + se, ymin = Lactose.consumed-se), width=0.2) + 
+  facet_wrap(~sex)+
+  theme_bw() + ggtitle("Average lactose consumed by LCT Genotype") +
+  xlab("LCT Genotype") + ylab("Estimated Lactose Consumed +/- SE (g)") +
+  theme(legend.position="none", 
+        plot.title = element_text(hjust=0.5))
+
+ggsave("../plots/asa24/lactose_lct_barplot_faceted.png", width=5, height=4, units="in", dpi=300)
+
+df3<- summarySE(data=ch, measurevar="d_total", groupvars="LCT")
+ggplot(data=df3, aes(x= LCT, y = d_total)) + geom_bar(aes(fill = LCT), stat="identity") + 
+  geom_errorbar(aes(ymax = d_total + se, ymin = d_total-se), width=0.2) + 
+  theme_bw() + ggtitle("Average Dairy Servings by LCT Genotype") +
+  xlab("LCT Genotype") + ylab("Dairy Consumption +/- SE (servings)") +
+  theme(legend.position="none", 
+        plot.title = element_text(hjust=0.5))
+ggsave("../plots/asa24/dtotal_lct_barplot.png", width=5, height=4, units="in", dpi=300)
+
+
+```
+
+```{r barplot-ethnicity}
+df4<- summarySE(data=dat, measurevar="Lactose.consumed", groupvars="Ethnicity")
+ggplot(data=df4, aes(x= Ethnicity, y = Lactose.consumed)) + geom_bar(aes(fill = Ethnicity), stat="identity") + 
+  geom_errorbar(aes(ymax = Lactose.consumed + se, ymin = Lactose.consumed-se), width=0.2) + 
+  theme_bw() + ggtitle("Lactose Consumed by Ethnicity") +
+  xlab("Ethnicity") + ylab("Estimated Lactose +/- SE (g)") +
+  theme(legend.position="none", 
+        plot.title = element_text(hjust=0.5))
+ggsave("../plots/asa24/lactose_ethnicity_barplot.png", width=5, height=4, units="in", dpi=300)
+
+df5<- summarySE(data=dat, measurevar="d_total", groupvars="Ethnicity")
+ggplot(data=df5, aes(x= Ethnicity, y = d_total)) + geom_bar(aes(fill = Ethnicity), stat="identity") + 
+  geom_errorbar(aes(ymax = d_total + se, ymin = d_total-se), width=0.2) + 
+  theme_bw() + ggtitle("Average Dairy Servings by Ethnicity") +
+  xlab("Ethnicity") + ylab("Dairy Consumption +/- SE (servings)") +
+  theme(legend.position="none", 
+        plot.title = element_text(hjust=0.5))
+```
+
